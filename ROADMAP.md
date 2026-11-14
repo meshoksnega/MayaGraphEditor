@@ -30,17 +30,65 @@ buried in a menu.
 * Visual check from real screenshots led to new ghost colours (no longer confused with the blue Z channel) and
   sidebar labels that don't clip.
 
-## Still open
+## Next: Phase 4 - Blocking and overlap (v1.3)
+
+What animators coming from Maya reach for daily once the basics are in place.
+
+| Item | What it does | Effort |
+|---|---|---|
+| **Stepped preview** | One toggle shows the selected objects' animation stepped for blocking review, without touching the keys (adds/removes a Stepped modifier on every curve). Toggle off and the splines are back. | S |
+| **Round to whole frames** | Button, plus an "auto" option for Retime, Region and Time Warp, so stretching never leaves keys on sub-frames. | S |
+| **Offset / stagger** | Live slider that shifts each selected curve (or bone) a little later than the previous one: quick overlap and follow-through. Order by selection, hierarchy or channel. | M |
+| **Seamless loop** | For cycles: copies the first key to the end (or matches them), lines up their tangents, sets Cycle infinity. One click. | S |
+| **Key sliders hub** | One panel for Blender's built-in slider tools (Ease, Push/Pull, Blend to Neighbour, Scale Average, Shear, Butterworth...), same live-preview feel and shortcuts. Cheap: they already exist, just buried. | S |
+| **Equalize handle lengths** | Maya-style "non-weighted" tangents: reset handle lengths to a third of the neighbouring segments *(exists in Blender as Equalize Handles; make it one click)*. | S |
+
+## Phase 5 - Finding and showing curves (v1.4)
+
+| Item | What it does | Effort |
+|---|---|---|
+| **Channel sets** | Save the visible/selected channels as a named set ("arms", "spine rot") and switch between sets in one click. Stored in the .blend. | M |
+| **Isolate curve** | Toggle to show only the selected curve(s); toggle back restores what was visible. | S |
+| **Auto-frame** | Optionally frame the selection whenever it changes (Maya's auto frame), with padding. | S |
+| **Select helpers** | Keys at the playhead (all curves), keys in the preview range, every Nth key, invert per curve. | S |
+| **Ghost from another source** | Snapshot a curve from another action, take or object and overlay it, e.g. compare against a mocap reference. | M |
+| **Partial swap** | Swap only the selected key range with the buffer curve instead of the whole curve. | S |
+
+## Phase 6 - Generators and shapes (v1.5)
+
+| Item | What it does | Effort |
+|---|---|---|
+| **Overlap generator** | Follow-through for a chain (tail, antenna, cloth bone): offset + damping down the chain, live preview, baked to keys. | L |
+| **Noise / settle** | Add controllable noise or a settle (decaying wiggle) to selected keys, live preview, seed. | M |
+| **Curve shape library** | Save a curve's shape (e.g. a good ease or bounce) and apply it to other keys, scaled to their time and value range. | M |
+| **Copy / paste with Maya options** | Paste modes: insert, replace range, merge, scale to fit, at playhead. *(Blender has offset/merge; this adds replace and scale-to-fit.)* | M |
+| **Stacked view (research)** | Maya's lanes-per-curve view. Blender doesn't let add-ons change how the editor draws curves, so this needs a prototype first (overlay drawing or a normalised offset trick) before committing. | L |
+
+## Phase 7 - Platform and quality (ongoing)
 
 | Item | Notes | Effort |
 |---|---|---|
-| Submit to extensions.blender.org | Prepared and validated; the submission itself is the maintainer's | S |
+| Submit to extensions.blender.org | Prepared and validated; the submission is the maintainer's | S |
+| "What's new" popup after an update | One short screen per version, with the GIF | S |
+| More languages + runtime strings | Japanese, Chinese, French, German, Portuguese; translate key counts | M |
+| Larger HUD text and a colour-blind-safe ghost palette | Preferences | S |
+| CI on Blender's daily build | Catch API changes before a release breaks the add-on | S |
+| Faster Simplify planning | Vectorise the planner; matters for multi-thousand-key mocap | M |
+| Settings presets | Export/import tool settings and shortcuts between machines | S |
+
+## Still open from earlier phases
+
+| Item | Notes | Effort |
+|---|---|---|
 | An animator's hands-on feedback | Everything is tested, but feel is best judged by use | S |
 | Verify ghosts with NLA time mapping and the *seconds* display | Assumed, not tested | S |
-| Translate runtime-built strings (key counts) and more languages | Framework in `i18n.py` | S |
 | Region lattice re-reads the display mapping during drags | Matters only with *Normalize* on | S |
 
 ## Suggested order
 
-1. ~~Phases 0 and 1~~ (v1.1) and ~~Phases 2 and 3~~ (v1.2): done.
-2. Get v1.2 into animators' hands, fix what they notice, then submit to extensions.blender.org.
+1. ~~Phases 0-3~~ (v1.1, v1.2): done.
+2. Hands-on feedback on v1.2, fixes, then extensions.blender.org submission (Phase 7, first item).
+3. **Phase 4** (v1.3): stepped preview, round to frames, offset/stagger, seamless loop, sliders hub. Mostly small,
+   high daily value, and they reuse the existing slider and snapshot code.
+4. **Phase 5** (v1.4): channel sets, isolate, auto-frame, select helpers.
+5. **Phase 6** (v1.5): generators and shape library; prototype stacked view before deciding on it.
