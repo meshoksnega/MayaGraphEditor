@@ -5,9 +5,14 @@
                                       Preferences > Get Extensions > (v) > Install from Disk
   maya_graph_editor-<ver>-legacy.zip  classic add-on layout (folder inside the zip)
                                       Preferences > Add-ons > Install from Disk (older Blender / legacy)
+
+  python build.py --store   also writes dist/store/maya_graph_editor-<ver>-extensions.zip:
+                            the build to submit to extensions.blender.org (no GitHub updater,
+                            no network permission)
 """
 import pathlib
 import re
+import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).parent
@@ -33,3 +38,21 @@ with zipfile.ZipFile(leg, "w", zipfile.ZIP_DEFLATED) as z:
         if f.name != "blender_manifest.toml":
             z.write(f, "maya_graph_editor/" + f.relative_to(PKG).as_posix())
 print("built", ext.name, "and", leg.name)
+
+if "--store" in sys.argv:
+    # Build for extensions.blender.org: no self-updater, no network permission.
+    # Kept out of dist/*.zip so it is never attached to a GitHub release.
+    store_dir = DIST / "store"
+    store_dir.mkdir(exist_ok=True)
+    store = store_dir / ("maya_graph_editor-%s-extensions.zip" % version)
+    manifest = (PKG / "blender_manifest.toml").read_text()
+    manifest = re.sub(r"\n\[permissions\]\n(?:[^\[\n][^\n]*\n?)*", "\n", manifest).rstrip() + "\n"
+    with zipfile.ZipFile(store, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            if f.name == "updater.py":
+                z.write(ROOT / "store" / "updater.py", "updater.py")
+            elif f.name == "blender_manifest.toml":
+                z.writestr("blender_manifest.toml", manifest)
+            else:
+                z.write(f, f.relative_to(PKG).as_posix())
+    print("built", "store/" + store.name, "(no updater, no network permission)")

@@ -7,8 +7,9 @@ unregisters its operators, panel and draw handlers entirely.
 
 import bpy
 
-from . import (cleanup, common, curves, ghost, i18n, keymaps, retime, simplify, slider, smooth, stats,
-               tangents, tween, updater, warp)
+from . import (blocking, channels, cleanup, common, curves, generate, ghost, hub, i18n, keymaps,
+               presets, retime, shapes, simplify, slider, smooth, stacked, stagger, stats,
+               tangents, tween, updater, warp, whatsnew)
 
 # Registration order == panel order (the panels also set bl_order).
 TOOLS = (
@@ -22,6 +23,13 @@ TOOLS = (
     ("smooth", smooth, "Smooth (live preview)"),
     ("warp", warp, "Time Warp (ease timing)"),
     ("cleanup", cleanup, "Mocap Cleanup (bake, simplify, tangents)"),
+    ("blocking", blocking, "Blocking (stepped preview, round, loop)"),
+    ("stagger", stagger, "Stagger / Overlap"),
+    ("hub", hub, "Key Sliders (Blender's slider tools)"),
+    ("channels", channels, "Channels & Selection"),
+    ("generate", generate, "Noise / Settle"),
+    ("shapes", shapes, "Shapes & Paste"),
+    ("stacked", stacked, "Stacked Overview (experimental)"),
 )
 
 _active = set()
@@ -87,7 +95,81 @@ _GHOST_COLORS = {"a": (0.85, 0.85, 0.85, 0.55), "b": (1.0, 0.55, 0.15, 0.65),
                  "c": (0.95, 0.35, 0.95, 0.65)}
 
 
+class MGE_ChannelSet(bpy.types.PropertyGroup):
+    data: bpy.props.StringProperty()   # JSON list of [data_path, array_index]
+
+
 class MGE_Settings(bpy.types.PropertyGroup):
+    # --- blocking
+    round_auto: bpy.props.BoolProperty(
+        name="Auto Round", default=False,
+        description="Round keys to whole frames after Retime / Region, Time Warp and Stagger")
+
+    # --- stagger / overlap
+    stagger_group: bpy.props.EnumProperty(
+        name="Group", items=[('BONE', "Per Bone / Object", "Curves of one bone or object move together"),
+                             ('CURVE', "Each Curve", "Every curve is its own step")], default='BONE')
+    stagger_order: bpy.props.EnumProperty(
+        name="Order", items=[('CHANNEL', "Channel List Order", "Top to bottom as listed in the editor"),
+                             ('HIERARCHY', "Bone Hierarchy", "From the root bone towards the tips")],
+        default='CHANNEL')
+    stagger_reverse: bpy.props.BoolProperty(name="Reverse Order", default=False)
+    stagger_offset: bpy.props.FloatProperty(
+        name="Offset", default=2.0, min=-12.0, max=12.0, precision=1,
+        description="Frames each step is shifted after the one before it",
+        update=lambda s, c: slider.on_value_changed("stagger", c))
+    stagger_gain: bpy.props.FloatProperty(
+        name="Gain per Step", default=100.0, min=10.0, max=200.0, precision=0, subtype='PERCENTAGE',
+        description="Scale each step's values by this much more than the step before")
+    overlap_delay: bpy.props.FloatProperty(
+        name="Delay", default=2.0, min=0.0, max=12.0, precision=1,
+        description="Frames each follower lags behind the one before it",
+        update=lambda s, c: slider.on_value_changed("overlap", c))
+    overlap_gain: bpy.props.FloatProperty(
+        name="Gain per Bone", default=90.0, min=10.0, max=200.0, precision=0, subtype='PERCENTAGE',
+        description="How much of the motion each follower keeps from the one before it")
+
+    # --- channels
+    channel_sets: bpy.props.CollectionProperty(type=MGE_ChannelSet)
+    auto_frame: bpy.props.BoolProperty(
+        name="Auto Frame Selection", default=False,
+        description="Frame the selected keys whenever the selection changes")
+    select_nth: bpy.props.IntProperty(name="N", default=2, min=2, max=100)
+
+    # --- ghost extras
+    ghost_source: bpy.props.PointerProperty(
+        name="Source Action", type=bpy.types.Action,
+        description="Action whose matching channels are shown as ghosts (reference, mocap, earlier take)")
+
+    # --- noise / settle
+    noise_amount: bpy.props.FloatProperty(
+        name="Amount", default=5.0, min=0.0, max=50.0, precision=1, subtype='PERCENTAGE',
+        description="Noise size as a percentage of each curve's value range",
+        update=lambda s, c: slider.on_value_changed("noise", c))
+    noise_scale: bpy.props.FloatProperty(
+        name="Scale", default=6.0, min=0.5, max=200.0, precision=1,
+        description="Frames per wiggle")
+    noise_seed: bpy.props.IntProperty(name="Seed", default=1, min=0)
+    settle_amount: bpy.props.FloatProperty(
+        name="Amount", default=100.0, min=0.0, max=200.0, precision=0, subtype='PERCENTAGE',
+        description="Size of the wobble (100% matches the incoming speed)",
+        update=lambda s, c: slider.on_value_changed("settle", c))
+    settle_period: bpy.props.FloatProperty(
+        name="Wobble", default=8.0, min=2.0, max=60.0, precision=0,
+        description="Frames per wobble")
+    settle_length: bpy.props.FloatProperty(
+        name="Length", default=24.0, min=4.0, max=240.0, precision=0,
+        description="Frames until the motion has come to rest")
+
+    # --- shapes / paste
+    shape_active: bpy.props.EnumProperty(name="Shape", items=shapes.enum_items)
+    paste_relative: bpy.props.BoolProperty(
+        name="Relative Values", default=False,
+        description="Offset pasted values so they start from the curve's current value")
+
+    # --- stacked overview
+    stacked_show: bpy.props.BoolProperty(name="Stacked Overview", default=False, update=_redraw)
+
     # --- tangents
     tangent_side: bpy.props.EnumProperty(
         name="Side", items=tangents.SIDES, default='BOTH',
@@ -255,6 +337,20 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         name="Time Warp", default=True, update=_schedule_sync)
     enable_cleanup: bpy.props.BoolProperty(
         name="Mocap Cleanup", default=True, update=_schedule_sync)
+    enable_blocking: bpy.props.BoolProperty(name="Blocking", default=True, update=_schedule_sync)
+    enable_stagger: bpy.props.BoolProperty(name="Stagger / Overlap", default=True, update=_schedule_sync)
+    enable_hub: bpy.props.BoolProperty(name="Key Sliders", default=True, update=_schedule_sync)
+    enable_channels: bpy.props.BoolProperty(name="Channels", default=True, update=_schedule_sync)
+    enable_generate: bpy.props.BoolProperty(name="Noise / Settle", default=True, update=_schedule_sync)
+    enable_shapes: bpy.props.BoolProperty(name="Shapes & Paste", default=True, update=_schedule_sync)
+    enable_stacked: bpy.props.BoolProperty(name="Stacked Overview", default=True, update=_schedule_sync)
+    hud_scale: bpy.props.FloatProperty(
+        name="On-Screen Text Size", default=1.0, min=0.8, max=2.5, step=10, precision=1,
+        description="Size of the text in the add-on's on-screen bars, lattice and overviews",
+        update=_redraw)
+    show_whats_new: bpy.props.BoolProperty(
+        name="Show What's New after an update", default=True)
+    last_seen_version: bpy.props.StringProperty(default="", options={'HIDDEN'})
     use_theme_colors: bpy.props.BoolProperty(
         name="Use theme colours for on-screen bars and the lattice", default=True,
         update=_redraw)
@@ -275,6 +371,13 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         layout.label(text="Find the tools in the Graph Editor sidebar (N) > Maya tab.")
         layout.prop(self, "show_header_tangents")
         layout.prop(self, "use_theme_colors")
+        layout.prop(self, "hud_scale")
+        row = layout.row(align=True)
+        row.operator("mge.settings_export", icon='EXPORT')
+        row.operator("mge.settings_import", icon='IMPORT')
+        row = layout.row(align=True)
+        row.prop(self, "show_whats_new")
+        row.operator("mge.whats_new", text="What's New", icon='INFO')
         layout.separator()
         keymaps.draw_prefs(layout)
         layout.separator()
@@ -303,8 +406,8 @@ class MGE_PT_settings(bpy.types.Panel):
         updater.draw_sidebar_notice(self.layout)
 
 
-_core_classes = (MGE_Settings, MGE_Preferences, MGE_PT_settings) + updater.classes + \
-    slider.core_classes
+_core_classes = (MGE_ChannelSet, MGE_Settings, MGE_Preferences, MGE_PT_settings) + \
+    updater.classes + slider.core_classes + whatsnew.classes + presets.classes
 
 
 def register():
@@ -319,6 +422,7 @@ def register():
     # Preferences may not be readable yet while the add-on is being enabled.
     bpy.app.timers.register(sync_tools, first_interval=0.2)
     bpy.app.timers.register(updater.maybe_auto_check, first_interval=5.0)
+    bpy.app.timers.register(whatsnew.maybe_show, first_interval=2.0)
 
 
 def unregister():

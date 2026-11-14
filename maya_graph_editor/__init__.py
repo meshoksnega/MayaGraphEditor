@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Maya Graph Editor Tools",
     "author": "meshoksnega",
-    "version": (1, 2, 1),
+    "version": (1, 3, 0),
     "blender": (4, 2, 0),
     "location": "Graph Editor > Sidebar (N) > Maya",
     "description": ("Maya-style Graph Editor comforts: buffer/ghost curve, "
@@ -11,15 +11,17 @@ bl_info = {
 
 if "bpy" in locals():  # support Blender's "Reload Scripts"
     import importlib
-    for _m in ("common", "simplify_core", "ghost", "tangents", "simplify",
-               "retime", "curves", "stats", "slider", "cleanup", "i18n", "tween", "smooth", "warp",
-               "keymaps", "updater", "core"):
+    for _m in ("common", "simplify_core", "slider", "ghost", "tangents", "simplify", "retime",
+               "curves", "stats", "cleanup", "i18n", "tween", "smooth", "warp", "blocking",
+               "stagger", "hub", "channels", "generate", "shapes", "stacked", "whatsnew",
+               "presets", "keymaps", "updater", "core"):
         if _m in locals():
             importlib.reload(locals()[_m])
 
 import bpy  # noqa: E402,F401
-from . import (common, simplify_core, ghost, tangents, simplify, retime,  # noqa: E402,F401
-               curves, stats, slider, cleanup, i18n, tween, smooth, warp, keymaps, updater, core)
+from . import (common, simplify_core, slider, ghost, tangents, simplify, retime,  # noqa: E402,F401
+               curves, stats, cleanup, i18n, tween, smooth, warp, blocking, stagger, hub,
+               channels, generate, shapes, stacked, whatsnew, presets, keymaps, updater, core)
 
 
 def register():

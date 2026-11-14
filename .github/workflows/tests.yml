@@ -4,6 +4,8 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays: also runs against Blender's daily build
 
 jobs:
   headless:
@@ -28,6 +30,8 @@ jobs:
         run: python tests/test_v11.py
       - name: v1.2 feature tests
         run: python tests/test_v12.py
+      - name: v1.3 feature tests
+        run: python tests/test_v13.py
       - name: Simplify model vs Blender
         run: python tests/test_simplify_model.py
       - name: Updater tests
@@ -98,3 +102,36 @@ jobs:
           name: gui-screenshots-${{ matrix.blender }}
           path: gui_shots/
           if-no-files-found: ignore
+
+  daily:
+    name: GUI (Blender daily build, allowed to fail)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libxi6 libxkbcommon0 libxkbcommon-x11-0 libxxf86vm1 \
+            libxfixes3 libxrender1 libxrandr2 libsm6 libgl1 libegl1 libgl1-mesa-dri libglx-mesa0 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 libdecor-0-0 imagemagick jq > /dev/null
+      - name: Download the latest daily build
+        run: |
+          url=$(curl -sSfL --retry 5 "https://builder.blender.org/download/daily/?format=json&v=1" \
+            | jq -r '[.[] | select(.platform=="linux" and .architecture=="x86_64" and .branch=="main" and .file_extension=="xz")][0].url')
+          echo "Daily build: $url"
+          curl -sSfL --retry 5 --retry-delay 10 --retry-all-errors "$url" -o blender.tar.xz
+          mkdir blender && tar -xf blender.tar.xz -C blender --strip-components=1
+      - name: Install add-on (legacy layout)
+        run: |
+          mkdir -p "$RUNNER_TEMP/scripts/addons"
+          ln -s "$GITHUB_WORKSPACE/maya_graph_editor" "$RUNNER_TEMP/scripts/addons/maya_graph_editor"
+      - name: Run GUI tests
+        env:
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}/scripts
+          MGE_SHOTS: ${{ github.workspace }}/gui_shots
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          timeout 900 xvfb-run -a -s "-screen 0 1600x1000x24" ./blender/blender \
+            --factory-startup --enable-event-simulate --python tests/gui/run_gui_tests.py

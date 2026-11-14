@@ -226,6 +226,13 @@ from maya_graph_editor import i18n, updater  # noqa: E402
 tr = i18n.build()
 check(tr["ru_RU"][("*", "Snapshot")] == "Снимок" and tr["es"][("Operator", "Snapshot")] == "Captura",
       "translation tables built for ru_RU and es")
+check(set(tr) >= {"ru_RU", "es", "fr_FR", "de_DE", "ja_JP", "zh_HANS", "zh_CN", "pt_BR"},
+      "seven languages (plus the older Chinese locale name)")
+missing = {loc: sum(1 for row in i18n.TABLE.values() if not row[i]) for i, loc in enumerate(i18n.LOCALES)}
+check(all(v == 0 for v in missing.values()), "no untranslated strings: %s" % missing)
+bad = [en for en, row in i18n.TABLE.items() if "{" in en and
+       any(sorted(__import__("re").findall(r"{\w+}", t)) != sorted(__import__("re").findall(r"{\w+}", en)) for t in row)]
+check(not bad, "format placeholders intact in every language %s" % bad)
 check(all(len(row) == len(i18n.LOCALES) for row in i18n.TABLE.values()), "every string has every language")
 prefs = bpy.context.preferences
 old_lang = (prefs.view.language, prefs.view.use_translate_interface)
