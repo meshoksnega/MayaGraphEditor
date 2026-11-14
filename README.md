@@ -85,6 +85,9 @@ Blender's default Graph Editor keymap.
 * **Save Ghosts in File** (on by default) keeps them in the .blend, stored on each action when you save.
 
 ### Simplify (live preview)
+
+![Simplify: 120 keys down to 8 while dragging, with the tolerance bar at the bottom](docs/media/simplify.jpg)
+
 1. Select a run of **3+ consecutive keys** (on one or several curves) and press **Simplify Selected Keys**.
 2. **Move the mouse** (Shift = fine) or drag the **Tolerance** slider in the sidebar. The real curves are
    rebuilt live, so what you see is exactly what you'll get. A bar at the bottom shows tolerance and
@@ -176,6 +179,8 @@ add-on comes from a remote extensions repository the Updates section just says s
 3. The **Release** GitHub Action builds both zips and publishes the release. That's what the updater installs.
 
 ## Language and colours
+
+![The Maya tab in Russian](docs/media/russian.jpg)
 
 * The interface is translated into **Russian** and **Spanish** (Preferences → Interface → Translation). Other
   languages can be added in `maya_graph_editor/i18n.py`. Numbers built at runtime (like "16 keys") stay in English.
