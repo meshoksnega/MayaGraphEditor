@@ -347,7 +347,16 @@ class Planner:
     def plan(self):
         """Returns (order, cum_error): key indices in removal order and the
         non-decreasing worst-case deviation after each removal."""
+        for _progress in self.plan_iter():
+            pass
+        return self.result
+
+    def plan_iter(self, every=25):
+        """Generator version of plan(): yields progress (0..1) every `every`
+        removals so a modal operator can spread the work over several ticks.
+        The result is left in self.result."""
         n_keys = self.c.n
+        total = max(sum(1 for r in self.removable if r), 1)
         version = [0] * n_keys
         gone = [False] * n_keys
         heap = []
@@ -359,6 +368,8 @@ class Planner:
 
         for i in range(n_keys):
             push(i)
+            if i % (every * 4) == 0 and i:
+                yield 0.0
         order, cum = [], []
         running = 0.0
         while heap:
@@ -386,7 +397,24 @@ class Planner:
             for k in near:
                 if k >= 0:
                     push(k)
-        return np.array(order, dtype=int), np.array(cum, dtype=np.float64)
+            if len(order) % every == 0:
+                yield len(order) / total
+        self.result = (np.array(order, dtype=int), np.array(cum, dtype=np.float64))
+        yield 1.0
+
+
+def make_planner(co, hl, hr, hl_types, hr_types, interpolation, removable,
+                 xs, ys, flat_ends=True, smoothing='CONT_ACCEL'):
+    """Planner for one curve (see build_plan for the arguments)."""
+    ipo_map = {'BEZIER': BEZIER, 'LINEAR': LINEAR, 'CONSTANT': CONSTANT}
+    curve = Curve(
+        co, hl, hr,
+        [HANDLE_CODES[t] for t in hl_types],
+        [HANDLE_CODES[t] for t in hr_types],
+        [ipo_map.get(t, BEZIER) for t in interpolation],
+        flat_ends, smoothing,
+    )
+    return Planner(curve, list(map(bool, removable)), xs, ys)
 
 
 def build_plan(co, hl, hr, hl_types, hr_types, interpolation, removable,
@@ -397,15 +425,8 @@ def build_plan(co, hl, hr, hl_types, hr_types, interpolation, removable,
     removable: bool array; xs/ys: dense samples of the original curve.
     Returns (order, cum_error).
     """
-    ipo_map = {'BEZIER': BEZIER, 'LINEAR': LINEAR, 'CONSTANT': CONSTANT}
-    curve = Curve(
-        co, hl, hr,
-        [HANDLE_CODES[t] for t in hl_types],
-        [HANDLE_CODES[t] for t in hr_types],
-        [ipo_map.get(t, BEZIER) for t in interpolation],
-        flat_ends, smoothing,
-    )
-    return Planner(curve, list(map(bool, removable)), xs, ys).plan()
+    return make_planner(co, hl, hr, hl_types, hr_types, interpolation, removable,
+                        xs, ys, flat_ends, smoothing).plan()
 
 
 def removal_count(cum_error, tolerance):
