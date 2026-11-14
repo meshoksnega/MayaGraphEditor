@@ -267,7 +267,28 @@ def _apply_box(context, nt0, nt1, nv0=None, nv1=None, ses=None):
             vbox=vbox, mapping=c.mapping)
         c.base.write(fc, co=co, hl=hl, hr=hr)
     ses.cur = (nt0, nt1, ses.v0 if nv0 is None else nv0, ses.v1 if nv1 is None else nv1)
+    live = _normalized_box(context, ses, fmap)
+    if live is not None:  # Normalize re-scales the display as values change
+        ses.cur = (nt0, nt1, live[0], live[1])
     common.redraw_graph_editors()
+
+
+def _normalized_box(context, ses, fmap, update_mapping=False):
+    """With Normalize on, the value box as Blender currently displays it."""
+    space = getattr(context, "space_data", None)
+    if not ses.values or space is None or not getattr(space, "use_normalization", False):
+        return None
+    vs = []
+    for c in ses.curves:
+        fc = fmap.get(c.key)
+        if fc is None:
+            continue
+        scale, off = common.display_mapping(fc, space, context.scene)
+        if update_mapping:
+            c.mapping = (scale, off)
+        ys = [k.co[1] for k, m in zip(fc.keyframe_points, c.mask) if m]
+        vs.extend((y + off) * scale for y in ys)
+    return (min(vs), max(vs)) if vs else None
 
 
 def _commit(context, ses=None):
@@ -281,6 +302,9 @@ def _commit(context, ses=None):
         c.base = common.CurveSnapshot.of(fc)
         if ses.scope != 'RIG':  # rig scope keeps its time-range mask
             c.mask = c.base.selected
+    live = _normalized_box(context, ses, fmap, update_mapping=True)
+    if live is not None:
+        ses.cur = (ses.cur[0], ses.cur[1], live[0], live[1])
     ses.t0, ses.t1, ses.v0, ses.v1 = ses.cur
     ses.drag = None
 

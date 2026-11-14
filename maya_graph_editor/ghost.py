@@ -18,6 +18,7 @@ import bpy
 import numpy as np
 
 from . import common
+from .i18n import iface
 
 SLOTS = ('A', 'B', 'C')
 PROP = "mge_ghosts"
@@ -497,7 +498,8 @@ class MGE_PT_ghost(bpy.types.Panel):
             row.prop(st, "ghost_show_" + low, text="", icon='HIDE_OFF' if shown else 'HIDE_ON')
             row.prop(st, "ghost_color_" + low, text="")
             n = buffer_count(slot)
-            row.label(text="%s: %d curve%s" % (slot, n, "" if n == 1 else "s"))
+            row.label(text=iface("{slot}: {count} curves").format(slot=slot, count=n),
+                      translate=False)
         col = layout.column()
         col.prop(st, "ghost_width")
         col.row().prop(st, "ghost_style", expand=True)

@@ -545,6 +545,204 @@ def sequence():
     except Exception as e:
         check(False, "language switch failed: %s" % e)
 
+    # ---------------------------------------------------------- v1.3 tools
+    from maya_graph_editor import blocking, channels, stacked  # noqa: F401
+    space = graph_area().spaces.active
+    scene = bpy.context.scene
+
+    def deselect_everything():
+        for c in _all_fcurves(bpy.data.objects[obj_name]):
+            for k in c.keyframe_points:
+                k.select_control_point = k.select_left_handle = k.select_right_handle = False
+
+    def blender_draws_key_where_we_think(curve, index):
+        """Box-select a 9 px square at the pixel our mapping predicts for a key
+        and see whether Blender selects exactly that key."""
+        deselect_everything()
+        r = region_of(graph_area(), 'WINDOW')
+        ox, oy, sx, sy = common.view_affine(r)
+        k = curve.keyframe_points[index]
+        vscale, voff = common.display_mapping(curve, space, scene)
+        nscale, noff = common.nla_mapping(curve)
+        px = ox + (k.co[0] * nscale + noff) * common.time_scale(space, scene) * sx
+        py = oy + (k.co[1] + voff) * vscale * sy
+        with override():
+            bpy.ops.graph.select_box(xmin=int(px - 4), xmax=int(px + 5), ymin=int(py - 4),
+                                     ymax=int(py + 5), wait_for_input=False, mode='SET')
+        hit = [i for i, kk in enumerate(curve.keyframe_points) if kk.select_control_point]
+        return hit == [index], "predicted (%.0f, %.0f) px, selected %s" % (px, py, hit)
+
+    print("display mapping vs Blender", flush=True)
+    reset_curve([(1, 0), (11, 2), (21, 3.5), (31, 1), (41, 0)], set())
+    yield 0.3
+    ok, info = blender_draws_key_where_we_think(fc, 2)
+    check(ok, "plain curve: key is where the add-on expects it (%s)" % info)
+    rot = make_curve([(1, 0.0), (11, 1.0), (21, -0.5), (31, 0.8)], obj_name=obj_name,
+                     path="rotation_euler", index=0)
+    view_all()
+    yield 0.3
+    ok, info = blender_draws_key_where_we_think(rot, 1)
+    check(ok, "rotation curve shown in degrees (%s)" % info)
+    space.use_normalization = True
+    view_all()
+    yield 0.3
+    ok1, info1 = blender_draws_key_where_we_think(rot, 2)
+    ok2, info2 = blender_draws_key_where_we_think(fc, 2)
+    check(ok1 and ok2, "Normalize on: both curves (%s | %s)" % (info1, info2))
+    space.use_normalization = False
+    try:
+        space.show_seconds = True
+        view_all()
+        yield 0.3
+        ok, info = blender_draws_key_where_we_think(fc, 3)
+        check(ok, "seconds display (%s)" % info)
+    finally:
+        space.show_seconds = False
+    view_all()
+    yield 0.2
+    try:
+        cube = bpy.data.objects[obj_name]
+        ad = cube.animation_data
+        act = ad.action
+        track = ad.nla_tracks.new()
+        strip = track.strips.new("gui", 40, act)
+        strip.scale = 1.5
+        ad.action = None
+        strip.select = True
+        track.select = True
+        ad.nla_tracks.active = track
+        ad.use_tweak_mode = True
+        common.clear_caches()
+        yield 0.3
+        view_all()
+        yield 0.3
+        tw = [c for c in _all_fcurves(cube) if c.data_path == "location"][0]
+        nscale, noff = common.nla_mapping(tw)
+        ok, info = blender_draws_key_where_we_think(tw, 2)
+        check(abs(nscale - 1.5) < 1e-3 and ok, "NLA strip (offset 40, scale 1.5) in tweak mode (%s)" % info)
+        ad.use_tweak_mode = False
+        ad.nla_tracks.remove(track)
+        ad.action = act
+        if hasattr(ad, "action_slot") and act.slots:
+            ad.action_slot = act.slots[0]
+        common.clear_caches()
+    except Exception as e:
+        check(False, "NLA tweak-mode check could not run: %r" % e)
+    yield 0.3
+    cube = bpy.data.objects[obj_name]
+    fc = [c for c in _all_fcurves(cube) if c.data_path == "location"][0]
+    rot = [c for c in _all_fcurves(cube) if c.data_path == "rotation_euler"][0]
+
+    print("blocking / channels", flush=True)
+    with override('UI'):
+        res = bpy.ops.mge.stepped_preview()
+    check(res == {'FINISHED'} and all(k.interpolation == 'CONSTANT' for k in fc.keyframe_points)
+          and all(k.interpolation == 'CONSTANT' for k in rot.keyframe_points), "stepped preview on")
+    redraw()
+    shot("13_stepped_preview")
+    with override('UI'):
+        bpy.ops.mge.stepped_preview()
+    check(all(k.interpolation == 'BEZIER' for k in fc.keyframe_points), "stepped preview off restores")
+    deselect_everything()
+    rot.select, fc.select = True, False
+    with override('UI'):
+        bpy.ops.mge.channel_set_add(name="rot only")
+        fc.select = True
+        bpy.ops.mge.channel_set_apply(index=0)
+    check(fc.hide and not rot.hide, "channel set shows only its channel")
+    with override('UI'):
+        bpy.ops.mge.channels_show_all()
+    check(not fc.hide and not rot.hide, "show all")
+    bpy.context.scene.mge_settings.channel_sets.clear()
+
+    print("auto frame", flush=True)
+    st.auto_frame = True
+    deselect_everything()
+    yield 1.0
+    r = region_of(graph_area(), 'WINDOW')
+    for k in fc.keyframe_points[:2]:
+        k.select_control_point = True
+    yield 1.2
+    before_view = r.view2d.region_to_view(0, 0)
+    deselect_everything()
+    for k in fc.keyframe_points[3:]:
+        k.select_control_point = True
+    yield 1.5
+    after_view = r.view2d.region_to_view(0, 0)
+    check(abs(after_view[0] - before_view[0]) > 1.0, "view re-framed when the selection changed (%.1f -> %.1f)"
+          % (before_view[0], after_view[0]))
+    st.auto_frame = False
+
+    print("settle modal / Blender slider", flush=True)
+    rot.hide = True
+    reset_curve([(1, 0), (11, 6), (60, 6)], {1})
+    yield 0.3
+    st.settle_amount = 0.0
+    r = region_of(graph_area(), 'WINDOW')
+    cx, cy = r.x + r.width // 3, r.y + r.height // 2
+    ev('MOUSEMOVE', 'NOTHING', cx, cy)
+    yield 0.1
+    with override():
+        res = bpy.ops.mge.settle('INVOKE_DEFAULT')
+    check(res == {'RUNNING_MODAL'}, "settle started")
+    yield 0.2
+    for i in range(1, 7):
+        ev('MOUSEMOVE', 'NOTHING', cx + i * 30, cy)
+        yield 0.05
+    n_keys = len(fc.keyframe_points)
+    check(n_keys > 6 and st.settle_amount > 0, "dragging adds the settle keys live (%d keys)" % n_keys)
+    shot("14_settle")
+    key('ESC')
+    yield 0.3
+    check(len(fc.keyframe_points) == 3, "Esc removes them again")
+
+    reset_curve([(1, 0), (11, 2), (21, 8), (31, 10)], {1, 2})
+    yield 0.3
+    before_vals = [k.co[1] for k in fc.keyframe_points]
+    ev('MOUSEMOVE', 'NOTHING', cx, cy)
+    yield 0.1
+    with override('UI'):
+        res = bpy.ops.mge.blender_slider(name="blend_to_neighbor")
+    check(res == {'FINISHED'}, "Blender's Blend to Neighbor started from the sidebar: %s" % res)
+    yield 0.2
+    for i in range(1, 6):
+        ev('MOUSEMOVE', 'NOTHING', cx + i * 40, cy)
+        yield 0.05
+    ev('LEFTMOUSE', 'PRESS', cx + 200, cy)
+    ev('LEFTMOUSE', 'RELEASE', cx + 200, cy)
+    yield 0.3
+    after_vals = [k.co[1] for k in fc.keyframe_points]
+    check(after_vals != before_vals and after_vals[0] == before_vals[0],
+          "its slider changed the selected keys: %s" % [round(v, 2) for v in after_vals])
+
+    print("stacked overview / what's new", flush=True)
+    rot.hide = False
+    cube = bpy.data.objects[obj_name]
+    for i in (0, 1):
+        make_curve([(1, i), (15, 2 - i), (30, i * 2), (41, 1)], obj_name=obj_name, path="location", index=i)
+    view_all()
+    with override('UI'):
+        bpy.ops.mge.stacked_toggle()
+    for _ in range(2):
+        redraw()
+        yield 0.1
+    shot("15_stacked_overview")
+    bpy.context.preferences.addons["maya_graph_editor"].preferences.hud_scale = 1.6
+    redraw()
+    yield 0.1
+    shot("16_stacked_large_text")
+    bpy.context.preferences.addons["maya_graph_editor"].preferences.hud_scale = 1.0
+    with override('UI'):
+        bpy.ops.mge.stacked_toggle()
+    with override():
+        res = bpy.ops.mge.whats_new('INVOKE_DEFAULT', since="1.2.1")
+    yield 0.4
+    shot("17_whats_new", area_only=False)
+    key('ESC')
+    ev('MOUSEMOVE', 'NOTHING', 5, 5)
+    yield 0.3
+    fc = [c for c in _all_fcurves(cube) if c.data_path == "location" and c.array_index == 2][0]
+
     # ---------------------------------------------------------- panels / prefs drawn
     print("panels", flush=True)
     for k in fc.keyframe_points:

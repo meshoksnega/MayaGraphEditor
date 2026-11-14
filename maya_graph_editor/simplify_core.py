@@ -23,6 +23,7 @@ Handle model (validated against Blender, see tests/test_simplify_model.py)
 """
 
 import heapq
+from bisect import bisect_left
 
 import numpy as np
 
@@ -41,9 +42,10 @@ class Curve:
 
     def __init__(self, co, hl, hr, hl_type, hr_type, ipo, flat_ends=True,
                  smoothing='CONT_ACCEL'):
-        self.x, self.y = co[:, 0], co[:, 1]
-        self.hlx, self.hly = hl[:, 0], hl[:, 1]
-        self.hrx, self.hry = hr[:, 0], hr[:, 1]
+        # plain lists: keys are read one at a time, where numpy scalars are slow
+        self.x, self.y = co[:, 0].tolist(), co[:, 1].tolist()
+        self.hlx, self.hly = hl[:, 0].tolist(), hl[:, 1].tolist()
+        self.hrx, self.hry = hr[:, 0].tolist(), hr[:, 1].tolist()
         self.lt = hl_type
         self.rt = hr_type
         self.ipo = ipo
@@ -167,6 +169,63 @@ def _eval_segment(x0, y0, x1, y1, h_r, h_l, ipo, xs):
     return np.interp(xs, bx, by)
 
 
+SMALL_SEGMENT = 32  # samples; below this plain Python beats numpy call overhead
+
+
+def _segment_error_small(x0, y0, x1, y1, h_r, h_l, ipo, xs, ys, s0, s1):
+    """max |segment(x) - original(x)| over samples s0..s1, without numpy."""
+    worst = 0.0
+    span = x1 - x0
+    if ipo == CONSTANT:
+        for i in range(s0, s1):
+            e = abs(y0 - ys[i])
+            if e > worst:
+                worst = e
+        return worst
+    if ipo == LINEAR or span < 1e-9:
+        k = (y1 - y0) / max(span, 1e-9)
+        for i in range(s0, s1):
+            e = abs(y0 + k * (xs[i] - x0) - ys[i])
+            if e > worst:
+                worst = e
+        return worst
+    a = max(h_r[0] - x0, 0.0)
+    b = max(x1 - h_l[0], 0.0)
+    ay, by = h_r[1], h_l[1]
+    if a + b > span:
+        f = span / (a + b)
+        a, b = a * f, b * f
+        ay = y0 + (ay - y0) * f
+        by = y1 + (by - y1) * f
+    px1, px2 = x0 + a, x1 - b
+    # x(t) is exactly linear when both handles sit at a third (all auto keys)
+    linear_x = abs(a - span / 3.0) < 1e-9 * span and abs(b - span / 3.0) < 1e-9 * span
+    cx3, cx2, cx1 = x1 - x0 + 3.0 * (px1 - px2), 3.0 * (x0 - 2.0 * px1 + px2), 3.0 * (px1 - x0)
+    for i in range(s0, s1):
+        x = xs[i]
+        t = (x - x0) / span
+        if not linear_x:
+            for _ in range(8):  # Newton on the monotonic cubic x(t)
+                fx = ((cx3 * t + cx2) * t + cx1) * t + x0 - x
+                d = (3.0 * cx3 * t + 2.0 * cx2) * t + cx1
+                if abs(d) < 1e-12:
+                    break
+                step = fx / d
+                t -= step
+                if t < 0.0:
+                    t = 0.0
+                elif t > 1.0:
+                    t = 1.0
+                if abs(step) < 1e-9:
+                    break
+        u = 1.0 - t
+        yv = u * u * u * y0 + 3.0 * u * u * t * ay + 3.0 * u * t * t * by + t * t * t * y1
+        e = abs(yv - ys[i])
+        if e > worst:
+            worst = e
+    return worst
+
+
 # --------------------------------------------------------------------------
 # Planner
 # --------------------------------------------------------------------------
@@ -180,11 +239,16 @@ class Planner:
         self.prev = list(range(-1, n - 1))
         self.next = list(range(1, n)) + [-1]
         # current handle slopes (dy/dx), read from Blender's own handles
-        dxl = curve.x - curve.hlx
-        dxr = curve.hrx - curve.x
-        with np.errstate(divide='ignore', invalid='ignore'):
-            self.sl = np.where(dxl > 1e-9, (curve.y - curve.hly) / dxl, 0.0)
-            self.sr = np.where(dxr > 1e-9, (curve.hry - curve.y) / dxr, 0.0)
+        self.sl, self.sr = [0.0] * n, [0.0] * n
+        for k in range(n):
+            dxl = curve.x[k] - curve.hlx[k]
+            dxr = curve.hrx[k] - curve.x[k]
+            if dxl > 1e-9:
+                self.sl[k] = (curve.y[k] - curve.hly[k]) / dxl
+            if dxr > 1e-9:
+                self.sr[k] = (curve.hry[k] - curve.y[k]) / dxr
+        self.xs_list = np.asarray(xs, dtype=np.float64).tolist()
+        self.ys_list = np.asarray(ys, dtype=np.float64).tolist()
 
     # ---- handles of the keys of a chain ------------------------------------
     def _chain_around(self, p, n):
@@ -213,11 +277,11 @@ class Planner:
                 out[k] = key_handles(c, k, pp, nn)
             return out
 
-        x = c.x[chain]
-        y = c.y[chain]
-        fixed = np.zeros(m, bool)
-        sl = np.zeros(m)
-        sr = np.zeros(m)
+        x = [c.x[k] for k in chain]
+        y = [c.y[k] for k in chain]
+        fixed = [False] * m
+        sl = [0.0] * m
+        sr = [0.0] * m
         out = {}
         for j, k in enumerate(chain):
             at_end = self.prev[k] < 0 or self.next[k] < 0
@@ -239,26 +303,37 @@ class Planner:
 
         unknown = [j for j in range(m) if not fixed[j]]
         if unknown:
-            idx = {j: i for i, j in enumerate(unknown)}
-            A = np.zeros((len(unknown), len(unknown)))
-            r = np.zeros(len(unknown))
-            for j in unknown:
-                i = idx[j]
-                h0, h1 = x[j] - x[j - 1], x[j + 1] - x[j]
-                d0, d1 = (y[j] - y[j - 1]) / h0, (y[j + 1] - y[j]) / h1
-                A[i, i] = 2.0 * (h0 + h1)
-                r[i] = 3.0 * (h1 * d0 + h0 * d1)
-                if (j - 1) in idx:
-                    A[i, idx[j - 1]] = h1
-                else:
-                    r[i] -= h1 * sr[j - 1]
-                if (j + 1) in idx:
-                    A[i, idx[j + 1]] = h0
-                else:
-                    r[i] -= h0 * sl[j + 1]
-            sol = np.linalg.solve(A, r)
-            for j in unknown:
-                sl[j] = sr[j] = sol[idx[j]]
+            # Unknown slopes form runs of neighbours; each run is a small
+            # tridiagonal system, solved directly (Thomas algorithm).
+            run = []
+            for j in unknown + [None]:
+                if run and (j is None or j != run[-1] + 1):
+                    lower, diag, upper, rhs = [], [], [], []
+                    for q in run:
+                        h0, h1 = x[q] - x[q - 1], x[q + 1] - x[q]
+                        d0, d1 = (y[q] - y[q - 1]) / h0, (y[q + 1] - y[q]) / h1
+                        r = 3.0 * (h1 * d0 + h0 * d1)
+                        if q == run[0]:
+                            r -= h1 * sr[q - 1]
+                        if q == run[-1]:
+                            r -= h0 * sl[q + 1]
+                        lower.append(h1)
+                        diag.append(2.0 * (h0 + h1))
+                        upper.append(h0)
+                        rhs.append(r)
+                    for i in range(1, len(run)):
+                        f = lower[i] / diag[i - 1]
+                        diag[i] -= f * upper[i - 1]
+                        rhs[i] -= f * rhs[i - 1]
+                    sol = [0.0] * len(run)
+                    sol[-1] = rhs[-1] / diag[-1]
+                    for i in range(len(run) - 2, -1, -1):
+                        sol[i] = (rhs[i] - upper[i] * sol[i + 1]) / diag[i]
+                    for q, v in zip(run, sol):
+                        sl[q] = sr[q] = v
+                    run = []
+                if j is not None:
+                    run.append(j)
 
         for j, k in enumerate(chain):
             pk = chain[j - 1] if j > 0 else self.prev[k]
@@ -312,19 +387,26 @@ class Planner:
         ip = chain.index(p1)
         lo, hi = max(ip - 1, 0), min(ip + 2, len(chain) - 1)
         worst = 0.0
+        xs_l = self.xs_list
         for a, b in zip(chain[lo:hi], chain[lo + 1:hi + 1]):
-            s0 = np.searchsorted(self.xs, c.x[a], 'left')
-            s1 = np.searchsorted(self.xs, c.x[b], 'left')
+            s0 = bisect_left(xs_l, c.x[a])
+            s1 = bisect_left(xs_l, c.x[b], s0)
             if s1 <= s0:
                 continue
-            xs = self.xs[s0:s1]
-            ys = _eval_segment(c.x[a], c.y[a], c.x[b], c.y[b],
-                               (H[a][2], H[a][3]), (H[b][0], H[b][1]), c.ipo[a], xs)
-            worst = max(worst, float(np.max(np.abs(ys - self.ys[s0:s1]))))
+            h_r, h_l = (H[a][2], H[a][3]), (H[b][0], H[b][1])
+            if s1 - s0 <= SMALL_SEGMENT:
+                err = _segment_error_small(c.x[a], c.y[a], c.x[b], c.y[b], h_r, h_l, c.ipo[a],
+                                           xs_l, self.ys_list, s0, s1)
+            else:
+                ys = _eval_segment(c.x[a], c.y[a], c.x[b], c.y[b], h_r, h_l, c.ipo[a],
+                                   self.xs[s0:s1])
+                err = float(np.max(np.abs(ys - self.ys[s0:s1])))
+            if err > worst:
+                worst = err
         last = chain[hi]
-        j = np.searchsorted(self.xs, c.x[last], 'left')
-        if j < len(self.xs) and abs(self.xs[j] - c.x[last]) < 1e-7:
-            worst = max(worst, abs(float(self.ys[j]) - float(c.y[last])))
+        j = bisect_left(xs_l, c.x[last])
+        if j < len(xs_l) and abs(xs_l[j] - c.x[last]) < 1e-7:
+            worst = max(worst, abs(self.ys_list[j] - c.y[last]))
         return worst
 
     def _commit_slopes(self, p, n):
