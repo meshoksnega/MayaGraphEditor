@@ -343,8 +343,8 @@ def sequence():
             ses = retime._session
             seen.append("%s/%s mouse=(%d,%d) region=(%d,%d %dx%d) edges_px=(%.1f,%.1f) area_ok=%s" % (
                 event.type, event.value, event.mouse_x, event.mouse_y, r.x, r.y, r.width, r.height,
-                retime._frame_to_px(r, 1.0, ses.cur_t0) if ses else -1,
-                retime._frame_to_px(r, 1.0, ses.cur_t1) if ses else -1,
+                retime._frame_to_px(r, 1.0, ses.cur[0]) if ses else -1,
+                retime._frame_to_px(r, 1.0, ses.cur[1]) if ses else -1,
                 context.area is not None and context.area.as_pointer() == graph_area().as_pointer()))
         return real_modal(self, context, event)
     retime.MGE_OT_retime._modal = spy
