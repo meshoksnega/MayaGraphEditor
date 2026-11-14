@@ -117,15 +117,15 @@ select_all(f)
 orig = state(f)
 n = ghost.take_snapshot([f])
 check(n == 1 and ghost.buffer_count() == 1, "snapshot stored")
-buf = ghost._buffers[common.curve_key(f)]
+buf = ghost._buffers[('A', common.curve_key(f))]
 check(buf.samples.shape[1] == 2 and buf.samples[0, 0] == 1 and buf.samples[-1, 0] == 20, "samples span the key range")
 check(abs(buf.samples[-1, 1] - 1) < 1e-4, "samples follow the curve")
 f.keyframe_points[1].co = (10, 9.0); f.keyframe_points[1].handle_left[1] = 9; f.update()
 edited = state(f)
-check(ghost._buffers[common.curve_key(f)].samples is buf.samples, "editing the curve does not touch the ghost")
+check(ghost._buffers[('A', common.curve_key(f))].samples is buf.samples, "editing the curve does not touch the ghost")
 ghost.swap_with_buffer([f])
 check(state(f) == orig, "swap restores the buffered shape")
-swapped = ghost._buffers[common.curve_key(f)]
+swapped = ghost._buffers[('A', common.curve_key(f))]
 check(abs(swapped.samples[np.argmin(abs(swapped.samples[:, 0] - 10)), 1] - 9.0) < 1e-3, "swap stores the edited shape as new ghost")
 ghost.clear_buffers()
 check(ghost.buffer_count() == 0, "clear")

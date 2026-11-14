@@ -45,6 +45,17 @@ def retime_curve(snap, t0, t1, new_t0, new_t1, ripple):
     return co, hl, hr
 
 
+def scaled_range(t0, t1, percent, anchor):
+    """New (t0, t1) for a range scaled to `percent` about 'LEFT'/'CENTER'/'RIGHT'."""
+    width = (t1 - t0) * percent / 100.0
+    if anchor == 'RIGHT':
+        return t1 - width, t1
+    if anchor == 'CENTER':
+        mid = 0.5 * (t0 + t1)
+        return mid - width / 2.0, mid + width / 2.0
+    return t0, t0 + width
+
+
 def selection_range(snaps):
     xs = [s.co[s.selected, 0] for s in snaps if s.selected.any()]
     if not xs:
@@ -72,6 +83,7 @@ class Session:
         self.hover = None
         self.handle = None
         self.cursor_window = None
+        self.typed = ""                  # number typed during the modal
 
 
 def _begin(context):
@@ -90,8 +102,8 @@ def _begin(context):
     return ses
 
 
-def _apply_range(context, new_t0, new_t1):
-    ses = _session
+def _apply_range(context, new_t0, new_t1, ses=None):
+    ses = ses or _session
     ripple = common.get_settings(context).retime_ripple
     fmap = common.fcurve_map(context)
     for c in ses.curves:
@@ -104,9 +116,9 @@ def _apply_range(context, new_t0, new_t1):
     common.redraw_graph_editors()
 
 
-def _commit(context):
+def _commit(context, ses=None):
     """Make the current state the new base for the next drag."""
-    ses = _session
+    ses = ses or _session
     fmap = common.fcurve_map(context)
     for c in ses.curves:
         fc = fmap.get(c.key)
@@ -129,6 +141,20 @@ def _restore_base(context):
 
 def is_active():
     return _session is not None
+
+
+def scale_selection(context, percent, anchor):
+    """Retime by a typed percentage: inside a lattice session, or directly on
+    the selected keys.  Returns the new range, or None if nothing to do."""
+    ses = _session
+    if ses is None:
+        ses = _begin(context)
+        if ses is None:
+            return None
+    new = scaled_range(ses.t0, ses.t1, percent, anchor)
+    _apply_range(context, new[0], new[1], ses)
+    _commit(context, ses)
+    return new
 
 
 def abort_session():
@@ -210,7 +236,10 @@ def _draw_lattice():
         label = "RETIME   %.1f → %.1f   (length %.1f → %.1f,  %.0f%%)" % (
             ses.cur_t0, ses.cur_t1, width0, width1, pct)
         common.draw_text(max(xl, 12) + 8, h - 24, label, 14, (1, 1, 1, 1))
-        common.draw_text(12, 10, "drag an edge to stretch / compress · Ctrl = snap to "
+        if ses.typed:
+            common.draw_text(max(xl, 12) + 8, h - 44, "Scale: %s%%  (Enter = apply)" % ses.typed,
+                             14, (1.0, 0.8, 0.2, 1))
+        common.draw_text(12, 10, "drag an edge to stretch / compress · type a % · Ctrl = snap to "
                          "frames · Enter = apply · Esc = cancel", 11,
                          (0.75, 0.75, 0.78, 1))
     except Exception:
@@ -277,14 +306,38 @@ class MGE_OT_retime(bpy.types.Operator):
         inside = common.event_in_region(region, event)
         dragging = ses.drag is not None
 
+        if event.value == 'PRESS' and not dragging:
+            char = _TYPED_KEYS.get(event.type)
+            if char is not None:
+                if char != "." or "." not in ses.typed:
+                    ses.typed += char
+                common.redraw_graph_editors()
+                return {'RUNNING_MODAL'}
+            if event.type == 'BACK_SPACE' and ses.typed:
+                ses.typed = ses.typed[:-1]
+                common.redraw_graph_editors()
+                return {'RUNNING_MODAL'}
+
         if event.value == 'PRESS':
             if event.type == 'ESC' or (event.type == 'RIGHTMOUSE' and (inside or dragging)):
                 if dragging:
                     _restore_base(context)
                     return {'RUNNING_MODAL'}
+                if ses.typed:
+                    ses.typed = ""
+                    common.redraw_graph_editors()
+                    return {'RUNNING_MODAL'}
                 finish(context, apply=False)
                 return {'CANCELLED'}
             if event.type in {'RET', 'NUMPAD_ENTER', 'SPACE'}:
+                if ses.typed:
+                    try:
+                        pct = float(ses.typed)
+                    except ValueError:
+                        pct = 0.0
+                    ses.typed = ""
+                    if pct > 0.0:
+                        scale_selection(context, pct, common.get_settings(context).retime_anchor)
                 finish(context, apply=True)
                 return {'FINISHED'}
 
@@ -335,6 +388,33 @@ class MGE_OT_retime(bpy.types.Operator):
         if common.is_navigation_event(event):
             return {'PASS_THROUGH'}
         return {'RUNNING_MODAL'}
+
+
+_TYPED_KEYS = {**{n: str(i) for i, n in enumerate(
+    ("ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"))},
+    **{"NUMPAD_%d" % i: str(i) for i in range(10)}, "PERIOD": ".", "NUMPAD_PERIOD": "."}
+
+
+class MGE_OT_retime_scale(bpy.types.Operator):
+    bl_idname = "mge.retime_scale"
+    bl_label = "Scale Time"
+    bl_description = ("Stretch or compress the selected keys (or the open lattice) to the "
+                      "percentage set in the panel, about the chosen anchor")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    percent: bpy.props.FloatProperty(name="Scale", default=-1.0, subtype='PERCENTAGE')
+
+    @classmethod
+    def poll(cls, context):
+        return common.graph_poll(context) and common.modal_owner() in (None, "retime")
+
+    def execute(self, context):
+        st = common.get_settings(context)
+        pct = self.percent if self.percent > 0 else st.retime_percent
+        if scale_selection(context, pct, st.retime_anchor) is None:
+            self.report({'WARNING'}, "Select keyframes spanning at least two different frames")
+            return {'CANCELLED'}
+        return {'FINISHED'}
 
 
 class MGE_OT_retime_confirm(bpy.types.Operator):
@@ -389,6 +469,10 @@ class MGE_PT_retime(bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(st, "retime_ripple")
         col.prop(st, "retime_snap")
+        row = layout.row(align=True)
+        row.prop(st, "retime_percent", text="")
+        row.prop(st, "retime_anchor", text="")
+        row.operator("mge.retime_scale", text="", icon='CHECKMARK')
         if is_active():
             ses = _session
             w0, w1 = ses.t1 - ses.t0, ses.cur_t1 - ses.cur_t0
@@ -405,7 +489,8 @@ class MGE_PT_retime(bpy.types.Panel):
             layout.label(text="Select keys on one or more curves.")
 
 
-classes = (MGE_OT_retime, MGE_OT_retime_confirm, MGE_OT_retime_cancel, MGE_PT_retime)
+classes = (MGE_OT_retime, MGE_OT_retime_scale, MGE_OT_retime_confirm, MGE_OT_retime_cancel,
+           MGE_PT_retime)
 
 
 def register_tool():

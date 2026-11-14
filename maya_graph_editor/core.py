@@ -7,7 +7,7 @@ unregisters its operators, panel and draw handlers entirely.
 
 import bpy
 
-from . import common, ghost, retime, simplify, tangents, updater
+from . import common, curves, ghost, keymaps, retime, simplify, stats, tangents, updater
 
 # Registration order == panel order (the panels also set bl_order).
 TOOLS = (
@@ -15,6 +15,8 @@ TOOLS = (
     ("ghost", ghost, "Buffer / Ghost Curve"),
     ("simplify", simplify, "Curve Simplify (live preview)"),
     ("retime", retime, "Retiming Lattice"),
+    ("curves", curves, "Curves (Infinity, Euler Filter)"),
+    ("stats", stats, "Key Stats (frame / value fields)"),
 )
 
 _active = set()
@@ -41,8 +43,10 @@ def sync_tools():
                 except Exception:
                     common.log_exception("register %s" % cls.__name__)
             module.register_tool()
+            keymaps.add(name)
             _active.add(name)
         elif not want and name in _active:
+            keymaps.remove(name)
             module.unregister_tool()
             for cls in reversed(module.classes):
                 try:
@@ -67,18 +71,79 @@ def _tolerance_update(_self, context):
     simplify.on_tolerance_changed(context)
 
 
+def _redraw(_self=None, _context=None):
+    common.redraw_graph_editors()
+
+
+_GHOST_COLORS = {"a": (0.55, 0.8, 1.0, 0.6), "b": (1.0, 0.6, 0.25, 0.6), "c": (0.55, 1.0, 0.5, 0.6)}
+
+
 class MGE_Settings(bpy.types.PropertyGroup):
+    # --- tangents
+    tangent_side: bpy.props.EnumProperty(
+        name="Side", items=tangents.SIDES, default='BOTH',
+        description="Which tangent the buttons change (Ctrl+click: In, Alt+click: Out)")
+    new_key_tangent: bpy.props.EnumProperty(
+        name="New Keys", items=[(i, l, d) for i, l, d, _ip, _h in tangents.NEW_KEY_TYPES],
+        get=tangents.get_new_key_type, set=tangents.set_new_key_type,
+        description="Tangent of newly inserted keyframes (Blender's Preferences > Animation setting)")
+
+    # --- ghost
+    ghost_slot: bpy.props.EnumProperty(
+        name="Slot", items=[('A', "A", "Ghost slot A"), ('B', "B", "Ghost slot B"),
+                            ('C', "C", "Ghost slot C")], default='A',
+        description="Slot used by Snapshot / Swap / Clear")
     ghost_show: bpy.props.BoolProperty(
-        name="Show Ghost", default=True,
-        description="Draw the stored ghost curves in the Graph Editor",
-        update=lambda s, c: common.redraw_graph_editors())
-    ghost_color: bpy.props.FloatVectorProperty(
-        name="Ghost Color", subtype='COLOR', size=4, min=0.0, max=1.0,
-        default=(0.55, 0.8, 1.0, 0.6),
-        update=lambda s, c: common.redraw_graph_editors())
+        name="Show Ghosts", default=True,
+        description="Draw the stored ghost curves in the Graph Editor", update=_redraw)
+    ghost_show_a: bpy.props.BoolProperty(name="Show A", default=True, update=_redraw)
+    ghost_show_b: bpy.props.BoolProperty(name="Show B", default=True, update=_redraw)
+    ghost_show_c: bpy.props.BoolProperty(name="Show C", default=True, update=_redraw)
+    ghost_color_a: bpy.props.FloatVectorProperty(
+        name="Color A", subtype='COLOR', size=4, min=0.0, max=1.0,
+        default=_GHOST_COLORS["a"], update=_redraw)
+    ghost_color_b: bpy.props.FloatVectorProperty(
+        name="Color B", subtype='COLOR', size=4, min=0.0, max=1.0,
+        default=_GHOST_COLORS["b"], update=_redraw)
+    ghost_color_c: bpy.props.FloatVectorProperty(
+        name="Color C", subtype='COLOR', size=4, min=0.0, max=1.0,
+        default=_GHOST_COLORS["c"], update=_redraw)
     ghost_width: bpy.props.FloatProperty(
-        name="Line Width", default=1.5, min=0.5, max=8.0,
-        update=lambda s, c: common.redraw_graph_editors())
+        name="Line Width", default=1.5, min=0.5, max=8.0, update=_redraw)
+    ghost_style: bpy.props.EnumProperty(
+        name="Style", items=[('SOLID', "Solid", ""), ('DASHED', "Dashed", "")],
+        default='SOLID', update=_redraw)
+    ghost_range: bpy.props.EnumProperty(
+        name="Ghost Range",
+        items=[('KEYS', "Key Range", "From the first to the last key of each curve"),
+               ('SCENE', "Scene Range", "The scene (or preview) frame range, including "
+                                        "extrapolation and cycles")],
+        default='KEYS', description="Frames covered by new snapshots")
+    ghost_save: bpy.props.BoolProperty(
+        name="Save Ghosts in File", default=True,
+        description="Keep the ghosts when the .blend is saved and reopened")
+
+    # --- key stats
+    stats_mode: bpy.props.EnumProperty(
+        name="Mode", items=[('ABSOLUTE', "Absolute", "Show and set actual frame / value"),
+                            ('RELATIVE', "Relative", "Offset the selection by the number typed")],
+        default='ABSOLUTE')
+    stats_frame: bpy.props.FloatProperty(
+        name="Frame", get=stats.get_frame, set=stats.set_frame, precision=2,
+        description="Absolute: first selected frame (moves the whole selection). Relative: offset")
+    stats_value: bpy.props.FloatProperty(
+        name="Value", get=stats.get_value, set=stats.set_value, precision=3,
+        description="Absolute: value of every selected key. Relative: offset")
+
+    # --- retime
+    retime_percent: bpy.props.FloatProperty(
+        name="Scale", default=100.0, min=1.0, soft_max=400.0, subtype='PERCENTAGE',
+        description="Stretch the retime range to this percentage of its length")
+    retime_anchor: bpy.props.EnumProperty(
+        name="Anchor", items=[('LEFT', "Start", "Keep the first selected key in place"),
+                              ('CENTER', "Center", "Scale about the middle of the range"),
+                              ('RIGHT', "End", "Keep the last selected key in place")],
+        default='LEFT')
 
     simplify_tolerance: bpy.props.FloatProperty(
         name="Tolerance", default=2.0, min=0.0, max=100.0, soft_max=25.0,
@@ -117,6 +182,13 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         name="Curve Simplify", default=True, update=_schedule_sync)
     enable_retime: bpy.props.BoolProperty(
         name="Retiming Lattice", default=True, update=_schedule_sync)
+    enable_curves: bpy.props.BoolProperty(
+        name="Curves", default=True, update=_schedule_sync)
+    enable_stats: bpy.props.BoolProperty(
+        name="Key Stats", default=True, update=_schedule_sync)
+    show_header_tangents: bpy.props.BoolProperty(
+        name="Tangent buttons in the Graph Editor header", default=False, update=_redraw,
+        description="Also show the six tangent buttons as icons in the Graph Editor header")
 
     update_auto_check: bpy.props.BoolProperty(
         name="Check for updates on startup",
@@ -129,6 +201,9 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         layout.label(text="Tools (each can be switched off independently):")
         _draw_toggles(layout, self)
         layout.label(text="Find the tools in the Graph Editor sidebar (N) > Maya tab.")
+        layout.prop(self, "show_header_tangents")
+        layout.separator()
+        keymaps.draw_prefs(layout)
         layout.separator()
         updater.draw_prefs(layout, self)
 
@@ -164,6 +239,7 @@ def register():
     bpy.types.Scene.mge_settings = bpy.props.PointerProperty(type=MGE_Settings)
     if _on_load_pre not in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.append(_on_load_pre)
+    updater.restore_message()
     sync_tools()
     # Preferences may not be readable yet while the add-on is being enabled.
     bpy.app.timers.register(sync_tools, first_interval=0.2)
@@ -171,6 +247,7 @@ def register():
 
 
 def unregister():
+    keymaps.remove_all()
     for name, module, _label in reversed(TOOLS):
         if name in _active:
             module.unregister_tool()

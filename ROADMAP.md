@@ -4,35 +4,26 @@ What could come next, grouped by priority. Effort: **S** about a day, **M** a fe
 Items marked *(exists in Blender)* only need a one-click shortcut, because Blender already has the feature
 buried in a menu.
 
-## Phase 0 - Make what exists solid (do first)
+## Done in 1.1.0 (Phase 0 and Phase 1)
 
-The drawing and mouse-driven parts of v1.0 were written without a live Blender window. Before adding features:
+* Real-GUI tests in CI: Blender 4.2 LTS and 5.1 under Xvfb, driven by `event_simulate`. These found two bugs:
+  overlays drifted (up to 14 px) in 5.x, and loading saved ghosts crashed at startup. Headless tests run in CI too.
+* Rebindable shortcuts per tool, checked against Blender's default keymap; tangent pie menu (Alt+V); optional
+  tangent icons in the Graph Editor header.
+* Retime: typed percentage in the lattice, Scale % field with Start / Center / End anchor.
+* Simplify: large selections analysed in the background with a progress bar.
+* Ghosts saved in the .blend; the "update installed" message survives the add-on reloading itself.
+* Tangents: Break / Unify, In-only / Out-only (panel or Ctrl/Alt+click), default tangent for new keys.
+* Curves tool: Pre/Post Infinity (Constant, Linear, Cycle, Cycle with Offset, Oscillate) and Euler filter.
+* Key Stats tool: frame / value fields for the selection, absolute or relative, degrees for rotation.
+* Ghost slots A/B/C with their own colours, scene-range sampling, dashed style.
+
+## Still open from Phases 0 and 1
 
 | Item | Why | Effort |
 |---|---|---|
-| Hands-on test pass in Blender 4.2 LTS and 5.x | Ghost overlay, simplify HUD, retime lattice and modal events are untested in real use | S |
-| GUI tests in CI: GUI Blender under Xvfb, driven by `Window.event_simulate` (`--enable-event-simulate`) | Catches regressions in the modal tools automatically | M |
-| Headless tests in CI on every push (`pip install bpy`) | The existing test suites, run automatically | S |
-| Keyboard shortcuts (add-on keymap, rebindable) for tangents, snapshot/swap, simplify, retime | Maya users work from hotkeys | S |
-| Tangent pie menu (one hotkey, six directions) | Even faster than the sidebar | S |
-| Optional compact tangent row in the Graph Editor header | "Toolbar" that's visible without the sidebar | S |
-| Retime: type an exact scale % or target length while dragging | Precision | S |
-| Simplify: plan in the background with a progress bar | Removes the pause on thousands of keys | M |
-| Save ghosts in the .blend (custom property on the action) | Buffers survive save/reopen | S |
-| Show the "update installed" message again after the add-on reloads itself | The status is currently lost on reload | S |
-
-## Phase 1 - Quick Maya-parity wins
-
-| Item | Maya equivalent | Effort |
-|---|---|---|
-| **Break / Unify tangents** buttons (FREE vs ALIGNED handles) | Keys > Break / Unify Tangents | S |
-| **In-only / Out-only** tangent application (modifier click) | In Tangent / Out Tangent menus | S |
-| **Pre/Post Infinity** one-click: Constant, Linear, Cycle, Cycle with Offset, Oscillate (Cycles modifier + extrapolation) *(exists in Blender)* | Curves > Pre/Post Infinity | S |
-| **Euler filter** button *(exists in Blender: Discontinuity Filter)* | Curves > Euler Filter | S |
-| **Stats fields**: time and value boxes for the selection, absolute or relative offset across many keys | Graph Editor stats/value boxes | M |
-| **Default tangent for new keys** dropdown in the Maya tab (Blender preference) | Default In/Out Tangent | S |
-| **Multiple ghost slots** (A/B/C), each with its own colour | Several buffer curves | S |
-| Ghost **"from current frame range"** option and dashed-line style | - | S |
+| Hands-on look at the overlays by an animator | CI screenshots are blank under Xvfb, so appearance hasn't been inspected | S |
+| Verify ghosts with NLA time mapping and the *seconds* display | Assumed, not tested | S |
 
 ## Phase 2 - Bigger tools
 
@@ -58,7 +49,7 @@ The drawing and mouse-driven parts of v1.0 were written without a live Blender w
 
 ## Suggested order
 
-1. Phase 0 test pass and fixes, then shortcuts and pie menu (gets the v1 tools into daily use).
-2. Release v1.1 with the Phase 1 quick wins: Break/Unify, Infinity, Euler filter, ghost slots.
+1. ~~Phase 0 test pass and fixes, shortcuts and pie menu~~ and ~~Phase 1 quick wins~~: done in v1.1.
+2. Get v1.1 into an animator's hands and fix what they notice.
 3. Value lattice and region manipulator (v1.2), since they reuse the retime lattice.
 4. Tween and Smooth sliders on the live-preview pattern (v1.3).

@@ -30,6 +30,8 @@ RELEASES_PAGE = "https://github.com/%s/releases" % REPO
 USER_AGENT = "maya-graph-editor-updater"
 MAX_DOWNLOAD = 50 * 1024 * 1024
 AUTO_CHECK_INTERVAL = 24 * 3600
+# Survives the add-on reloading itself during an update.
+MARKER = os.path.join(tempfile.gettempdir(), "maya_graph_editor_update.json")
 
 # Shared with the worker thread; only plain Python values in here.
 _lock = threading.Lock()
@@ -268,9 +270,11 @@ def _install(path, info):
     kind, repo = install_kind()
     tag = info["tag"] if info else "?"
     try:
-        # Mark success first: an Extension install reloads this very module.
-        _set(status="INSTALLED", latest=info,
-             message="Updated to %s. Restart Blender if anything looks stale." % tag)
+        # Mark success first: an Extension install reloads this very module,
+        # so the message is also left in a marker file for the new code.
+        message = "Updated to %s. Restart Blender if anything looks stale." % tag
+        _set(status="INSTALLED", latest=info, message=message)
+        _write_marker(message)
         with _window_override():
             if kind == "EXTENSION":
                 bpy.ops.extensions.package_install_files(
@@ -279,8 +283,36 @@ def _install(path, info):
                 bpy.ops.preferences.addon_install(filepath=path, overwrite=True)
                 _set(status="INSTALLED", message="Installed %s. Restart Blender to load it." % tag)
     except Exception as e:
+        _clear_marker()
         _set(status="ERROR", message="Install failed: %s" % e)
         common.log_exception("updater install")
+
+
+def _write_marker(message):
+    try:
+        with open(MARKER, "w", encoding="utf-8") as f:
+            json.dump({"message": message, "time": time.time()}, f)
+    except OSError:
+        pass
+
+
+def _clear_marker():
+    try:
+        os.remove(MARKER)
+    except OSError:
+        pass
+
+
+def restore_message():
+    """Called on register: show the result of an update that just reloaded us."""
+    try:
+        with open(MARKER, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return
+    _clear_marker()
+    if time.time() - data.get("time", 0) < 600:
+        _set(status="INSTALLED", message=data.get("message", "Update installed"))
 
 
 def maybe_auto_check():

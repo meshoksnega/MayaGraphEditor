@@ -21,8 +21,12 @@ _session = None
 _last_result = None
 
 
+SYNC_KEYS = 300          # smaller selections are analysed immediately
+TICK_BUDGET = 0.04       # seconds of analysis per modal timer tick
+
+
 class CurvePlan:
-    __slots__ = ("key", "snap", "order", "cum", "span", "applied")
+    __slots__ = ("key", "snap", "order", "cum", "span", "applied", "planner", "removable")
 
 
 class Session:
@@ -32,6 +36,37 @@ class Session:
         self.handle = None
         self.last_mouse_x = None
         self.cursor_window = None
+        self.timer = None
+        self.pending = [p for p in plans if p.order is None]  # still being analysed
+        self.iter = None
+        self.progress = 0.0
+
+    @property
+    def planning(self):
+        return bool(self.pending)
+
+    def step(self, budget=TICK_BUDGET):
+        """Advance the analysis for up to `budget` seconds. True when finished."""
+        import time
+        end = time.perf_counter() + budget
+        total = max(sum(int(p.removable) for p in self.plans), 1)
+        while self.pending and time.perf_counter() < end:
+            plan = self.pending[0]
+            if self.iter is None:
+                self.iter = plan.planner.plan_iter()
+            try:
+                frac = next(self.iter)
+            except StopIteration:
+                frac = 1.0
+            if frac >= 1.0 and getattr(plan.planner, "result", None) is not None:
+                plan.order, plan.cum = plan.planner.result
+                plan.planner = None
+                self.pending.pop(0)
+                self.iter = None
+            done = sum(int(p.removable) for p in self.plans if p.order is not None)
+            cur = int(plan.removable) * (frac if plan.order is None else 0.0)
+            self.progress = (done + cur) / total
+        return not self.pending
 
 
 # --------------------------------------------------------------------------
@@ -45,9 +80,10 @@ def _runs(selected):
     return np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
 
 
-def build_curve_plan(fc):
+def build_curve_plan(fc, analyse=True):
     """CurvePlan for one F-Curve, or None if fewer than 3 consecutive keys
-    are selected.  First and last key of every selected run are kept."""
+    are selected.  First and last key of every selected run are kept.
+    With analyse=False the removal order is left to plan.planner."""
     snap = common.CurveSnapshot.of(fc)
     removable = np.zeros(snap.n, dtype=bool)
     for run in _runs(snap.selected):
@@ -62,7 +98,7 @@ def build_curve_plan(fc):
     sel_x = snap.co[snap.selected, 0]
     in_sel = (xs >= sel_x.min()) & (xs <= sel_x.max())
     span = float(ys[in_sel].max() - ys[in_sel].min())
-    order, cum = simplify_core.build_plan(
+    planner = simplify_core.make_planner(
         snap.co, snap.hl, snap.hr,
         snap.enums["handle_left_type"], snap.enums["handle_right_type"],
         snap.enums["interpolation"], removable, xs, ys,
@@ -70,14 +106,19 @@ def build_curve_plan(fc):
         smoothing=getattr(fc, "auto_smoothing", 'NONE'))
     plan = CurvePlan()
     plan.key, plan.snap = common.curve_key(fc), snap
-    plan.order, plan.cum, plan.span, plan.applied = order, cum, span, 0
+    plan.span, plan.applied, plan.removable = span, 0, int(removable.sum())
+    plan.order = plan.cum = None
+    plan.planner = planner
+    if analyse:
+        plan.order, plan.cum = planner.plan()
+        plan.planner = None
     return plan
 
 
-def build_plans(context):
+def build_plans(context, analyse=True):
     plans = []
     for fc in common.editable_fcurves(context):
-        plan = build_curve_plan(fc)
+        plan = build_curve_plan(fc, analyse)
         if plan is not None:
             plans.append(plan)
     return plans
@@ -86,7 +127,8 @@ def build_plans(context):
 def counts(plans, pct):
     """(keys before, keys after) over the planned curves at `pct` tolerance."""
     before = sum(p.snap.n for p in plans)
-    removed = sum(simplify_core.removal_count(p.cum, p.span * pct / 100.0) for p in plans)
+    removed = sum(simplify_core.removal_count(p.cum, p.span * pct / 100.0)
+                  for p in plans if p.cum is not None)
     return before, before - removed
 
 
@@ -96,7 +138,7 @@ def counts(plans, pct):
 
 def apply_tolerance(context, pct):
     ses = _session
-    if ses is None:
+    if ses is None or ses.planning:
         return
     fmap = common.fcurve_map(context)
     for p in ses.plans:
@@ -154,6 +196,11 @@ def finish(context, apply):
                 p.snap.write(fc)
     if ses.handle is not None:
         bpy.types.SpaceGraphEditor.draw_handler_remove(ses.handle, 'WINDOW')
+    if ses.timer is not None:
+        try:
+            context.window_manager.event_timer_remove(ses.timer)
+        except Exception:
+            pass
     try:
         context.workspace.status_text_set(None)
     except Exception:
@@ -182,10 +229,19 @@ def _draw_hud():
         return
     try:
         pct = ctx.scene.mge_settings.simplify_tolerance
-        before, after = counts(ses.plans, pct)
         w = region.width
         x0, x1 = 24, max(w - 24, 200)
         common.draw_rect(x0 - 10, 14, x1 + 10, 78, (0.08, 0.08, 0.09, 0.78))
+        if ses.planning:
+            n = sum(p.snap.n for p in ses.plans)
+            common.draw_text(x0, 58, "SIMPLIFY   analysing %d keys... %d%%"
+                             % (n, int(ses.progress * 100)), 14, (1, 1, 1, 1))
+            common.draw_text(x0, 22, "Esc = cancel (nothing has changed yet)", 11,
+                             (0.75, 0.75, 0.78, 1))
+            common.draw_rect(x0, 44, x1, 48, (0.3, 0.3, 0.33, 1))
+            common.draw_rect(x0, 44, x0 + (x1 - x0) * ses.progress, 48, (0.35, 0.65, 1.0, 1))
+            return
+        before, after = counts(ses.plans, pct)
         common.draw_text(x0, 58, "SIMPLIFY   tolerance %.2f%%   keys %d → %d  (−%d)"
                          % (pct, before, after, before - after), 14, (1, 1, 1, 1))
         common.draw_text(x0, 22, "move mouse / drag slider · Shift = fine · "
@@ -218,12 +274,16 @@ class MGE_OT_simplify(bpy.types.Operator):
 
     def invoke(self, context, event):
         global _session
-        plans = build_plans(context)
+        plans = build_plans(context, analyse=False)
         if not plans:
             self.report({'WARNING'}, "Select at least 3 consecutive keyframes on a curve")
             return {'CANCELLED'}
         if not common.modal_claim("simplify"):
             return {'CANCELLED'}
+        if sum(p.snap.n for p in plans) <= SYNC_KEYS:
+            for p in plans:
+                p.order, p.cum = p.planner.plan()
+                p.planner = None
         ses = Session(context.area, plans)
         ses.handle = bpy.types.SpaceGraphEditor.draw_handler_add(
             _draw_hud, (), 'WINDOW', 'POST_PIXEL')
@@ -236,7 +296,10 @@ class MGE_OT_simplify(bpy.types.Operator):
             pass
         context.workspace.status_text_set(
             "Simplify: move mouse = tolerance (Shift: fine)   Click/Enter: apply   Esc/RMB: cancel")
-        apply_tolerance(context, common.get_settings(context).simplify_tolerance)
+        if ses.planning:
+            ses.timer = context.window_manager.event_timer_add(0.01, window=context.window)
+        else:
+            apply_tolerance(context, common.get_settings(context).simplify_tolerance)
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
@@ -257,6 +320,22 @@ class MGE_OT_simplify(bpy.types.Operator):
             return {'CANCELLED'}
         region = common.window_region(context.area)
         inside = region is not None and common.event_in_region(region, event)
+
+        if ses.planning:
+            if event.type == 'TIMER':
+                if ses.step():
+                    context.window_manager.event_timer_remove(ses.timer)
+                    ses.timer = None
+                    apply_tolerance(context, common.get_settings(context).simplify_tolerance)
+                common.redraw_graph_editors()
+                return {'RUNNING_MODAL'}
+            if event.value == 'PRESS' and (event.type == 'ESC' or
+                                           (event.type == 'RIGHTMOUSE' and inside)):
+                finish(context, apply=False)
+                return {'CANCELLED'}
+            if common.is_navigation_event(event) or not inside:
+                return {'PASS_THROUGH'}
+            return {'RUNNING_MODAL'}
 
         if event.value == 'PRESS':
             if event.type == 'ESC' or (event.type == 'RIGHTMOUSE' and inside):
@@ -336,7 +415,10 @@ class MGE_PT_simplify(bpy.types.Panel):
         layout = self.layout
         st = common.get_settings(context)
         layout.prop(st, "simplify_tolerance", slider=True)
-        if is_active():
+        if is_active() and _session.planning:
+            layout.label(text="Analysing... %d%%" % int(_session.progress * 100))
+            layout.operator("mge.simplify_cancel", icon='X')
+        elif is_active():
             before, after = counts(_session.plans, st.simplify_tolerance)
             layout.label(text="Keys: %d → %d  (−%d)" % (before, after, before - after))
             row = layout.row(align=True)

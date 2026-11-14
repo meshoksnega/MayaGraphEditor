@@ -1,0 +1,76 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  headless:
+    name: Headless (bpy ${{ matrix.bpy }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bpy: ["5.1.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install bpy
+        run: pip install "bpy==${{ matrix.bpy }}"
+      - name: Build zips
+        run: python build.py
+      - name: Add-on tests
+        run: python tests/test_addon.py
+      - name: v1.1 feature tests
+        run: python tests/test_v11.py
+      - name: Simplify model vs Blender
+        run: python tests/test_simplify_model.py
+      - name: Updater tests
+        run: python tests/test_updater.py
+
+  gui:
+    name: GUI (Blender ${{ matrix.blender }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - blender: "4.2.3"
+            series: "4.2"
+          - blender: "5.1.0"
+            series: "5.1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libxi6 libxkbcommon0 libxkbcommon-x11-0 libxxf86vm1 \
+            libxfixes3 libxrender1 libxrandr2 libsm6 libgl1 libegl1 libgl1-mesa-dri libglx-mesa0 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 libdecor-0-0 > /dev/null
+      - name: Download Blender
+        run: |
+          url="https://download.blender.org/release/Blender${{ matrix.series }}/blender-${{ matrix.blender }}-linux-x64.tar.xz"
+          curl -sSfL "$url" -o blender.tar.xz
+          mkdir blender && tar -xf blender.tar.xz -C blender --strip-components=1
+      - name: Install add-on (legacy layout)
+        run: |
+          mkdir -p "$RUNNER_TEMP/scripts/addons"
+          ln -s "$GITHUB_WORKSPACE/maya_graph_editor" "$RUNNER_TEMP/scripts/addons/maya_graph_editor"
+      - name: Run GUI tests
+        env:
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}/scripts
+          MGE_SHOTS: ${{ github.workspace }}/gui_shots
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          timeout 600 xvfb-run -a -s "-screen 0 1600x1000x24" ./blender/blender \
+            --factory-startup --enable-event-simulate --python tests/gui/run_gui_tests.py
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-screenshots-${{ matrix.blender }}
+          path: gui_shots/
+          if-no-files-found: ignore

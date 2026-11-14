@@ -14,7 +14,7 @@ import bpy
 # Name of the add-on package (differs between legacy add-on / Extension install).
 PKG = __package__
 
-TOOL_IDS = ("ghost", "tangents", "simplify", "retime")
+TOOL_IDS = ("ghost", "tangents", "simplify", "retime", "curves", "stats")
 
 
 # --------------------------------------------------------------------------
@@ -318,14 +318,20 @@ def time_scale(space, scene):
     return 1.0
 
 
-def sample_curve(fc, step=0.25, max_points=4000):
-    """Densely evaluate a curve across its keyframe range -> (n, 2) array."""
+def sample_curve(fc, step=0.25, max_points=4000, frame_range=None):
+    """Densely evaluate a curve -> (n, 2) array.
+
+    Over the keyframe range, or over `frame_range` (start, end) if given, which
+    includes extrapolation / cycles outside the keys."""
     kps = fc.keyframe_points
     n = len(kps)
     if n == 0:
         return None
     xs_keys = np.array([k.co[0] for k in kps], dtype=np.float64)
-    x0, x1 = xs_keys.min(), xs_keys.max()
+    if frame_range is not None:
+        x0, x1 = float(min(frame_range)), float(max(frame_range))
+    else:
+        x0, x1 = xs_keys.min(), xs_keys.max()
     if x1 - x0 < 1e-6:
         return np.array([[x0, fc.evaluate(x0)]], dtype=np.float64)
     count = int((x1 - x0) / step) + 1
@@ -338,7 +344,9 @@ def sample_curve(fc, step=0.25, max_points=4000):
     for i in range(1, n):
         if kps[i - 1].interpolation == 'CONSTANT':
             extra.append(xs_keys[i] - 1e-4)
-    xs = np.unique(np.concatenate([xs, xs_keys, np.array(extra)]))
+    inside = xs_keys[(xs_keys >= x0) & (xs_keys <= x1)]
+    extra = np.array([e for e in extra if x0 <= e <= x1])
+    xs = np.unique(np.concatenate([xs, inside, extra]))
     ys = np.array([fc.evaluate(float(x)) for x in xs], dtype=np.float64)
     return np.stack([xs, ys], axis=1)
 
@@ -349,10 +357,16 @@ def sample_curve(fc, step=0.25, max_points=4000):
 
 def view_affine(region):
     """Linear map view->region pixels: returns (ox, oy, sx, sy)."""
+    # view_to_region() returns rounded pixels in recent Blender versions, so a
+    # scale taken from two nearby points drifts by many pixels across the view.
+    # region_to_view() of the region corners gives exact floats instead.
     v2d = region.view2d
-    ox, oy = v2d.view_to_region(0.0, 0.0, clip=False)
-    ux, uy = v2d.view_to_region(1.0, 1.0, clip=False)
-    return float(ox), float(oy), float(ux - ox), float(uy - oy)
+    w, h = max(region.width, 1), max(region.height, 1)
+    vx0, vy0 = v2d.region_to_view(0, 0)
+    vx1, vy1 = v2d.region_to_view(w, h)
+    sx = w / (vx1 - vx0) if vx1 != vx0 else 1.0
+    sy = h / (vy1 - vy0) if vy1 != vy0 else 1.0
+    return -vx0 * sx, -vy0 * sy, sx, sy
 
 
 # --------------------------------------------------------------------------
@@ -389,6 +403,35 @@ def draw_polyline(points, color, width=1.5):
     except Exception:
         shader = gpu.shader.from_builtin('UNIFORM_COLOR')
         batch = batch_for_shader(shader, 'LINE_STRIP', {"pos": pts})
+        shader.bind()
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+    _set_blend('NONE')
+
+
+def draw_segments(segments, color, width=1.5):
+    """segments: [(x0, y0, x1, y1), ...] in region pixels."""
+    if not segments:
+        return
+    _set_blend('ALPHA')
+    try:
+        shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
+        pos = []
+        for x0, y0, x1, y1 in segments:
+            pos.append((float(x0), float(y0), 0.0))
+            pos.append((float(x1), float(y1), 0.0))
+        batch = batch_for_shader(shader, 'LINES', {"pos": pos})
+        shader.bind()
+        shader.uniform_float("viewportSize", gpu.state.viewport_get()[2:])
+        shader.uniform_float("lineWidth", width)
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+    except Exception:
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        pos = []
+        for x0, y0, x1, y1 in segments:
+            pos += [(float(x0), float(y0)), (float(x1), float(y1))]
+        batch = batch_for_shader(shader, 'LINES', {"pos": pos})
         shader.bind()
         shader.uniform_float("color", color)
         batch.draw(shader)
