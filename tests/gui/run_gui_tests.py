@@ -91,11 +91,22 @@ def redraw():
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
 
-def shot(name):
+def shot(name, area_only=True):
+    """Grab the X display (Blender's own screenshot is blank under Xvfb).
+
+    Saves <version>_<name>.png cropped to the Graph Editor (or the whole window)."""
+    import subprocess
+    redraw()
     path = os.path.join(SHOTS, "%s_%s.png" % (bpy.app.version_string.split()[0], name))
+    w = win()
+    geom = []
+    if area_only:
+        a = graph_area()
+        top = w.height - (a.y + a.height)  # X origin is top-left
+        geom = ["-crop", "%dx%d+%d+%d" % (a.width, a.height, a.x, top)]
     try:
-        with bpy.context.temp_override(window=win(), area=graph_area()):
-            bpy.ops.screen.screenshot_area(filepath=path)
+        subprocess.run(["import", "-silent", "-window", "root"] + geom + [path],
+                       check=True, timeout=20)
         print("  screenshot", path, flush=True)
     except Exception as e:
         print("  (screenshot failed: %s)" % e, flush=True)
