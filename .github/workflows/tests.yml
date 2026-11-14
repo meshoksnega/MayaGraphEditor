@@ -26,6 +26,8 @@ jobs:
         run: python tests/test_addon.py
       - name: v1.1 feature tests
         run: python tests/test_v11.py
+      - name: v1.2 feature tests
+        run: python tests/test_v12.py
       - name: Simplify model vs Blender
         run: python tests/test_simplify_model.py
       - name: Updater tests
@@ -49,17 +51,20 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb libxi6 libxkbcommon0 libxkbcommon-x11-0 libxxf86vm1 \
             libxfixes3 libxrender1 libxrandr2 libsm6 libgl1 libegl1 libgl1-mesa-dri libglx-mesa0 \
-            libwayland-client0 libwayland-cursor0 libwayland-egl1 libdecor-0-0 > /dev/null
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 libdecor-0-0 imagemagick > /dev/null
       - name: Download Blender
         run: |
           url="https://download.blender.org/release/Blender${{ matrix.series }}/blender-${{ matrix.blender }}-linux-x64.tar.xz"
-          curl -sSfL "$url" -o blender.tar.xz
+          curl -sSfL --retry 5 --retry-delay 10 --retry-all-errors "$url" -o blender.tar.xz
           mkdir blender && tar -xf blender.tar.xz -C blender --strip-components=1
       - name: Install add-on (legacy layout)
         run: |
           mkdir -p "$RUNNER_TEMP/scripts/addons"
           ln -s "$GITHUB_WORKSPACE/maya_graph_editor" "$RUNNER_TEMP/scripts/addons/maya_graph_editor"
+      - name: Validate the extension manifest (Blender's own checker)
+        run: ./blender/blender --factory-startup --command extension validate maya_graph_editor
       - name: Run GUI tests
+        if: success() || failure()
         env:
           BLENDER_USER_SCRIPTS: ${{ runner.temp }}/scripts
           MGE_SHOTS: ${{ github.workspace }}/gui_shots
@@ -67,6 +72,25 @@ jobs:
         run: |
           timeout 600 xvfb-run -a -s "-screen 0 1600x1000x24" ./blender/blender \
             --factory-startup --enable-event-simulate --python tests/gui/run_gui_tests.py
+      - name: Print screenshots into the log (small JPEGs, base64)
+        if: always() && matrix.blender == '5.1.0'
+        run: |
+          for name in tween smooth warp region; do
+            ls gui_shots/*_gif_${name}_*.png >/dev/null 2>&1 || continue
+            convert -delay 45 -loop 0 gui_shots/*_gif_${name}_*.png -resize 760x760\> +repage \
+              -dither None -colors 160 "gui_shots/demo_${name}.gif"
+            echo "=====BEGIN demo_${name}.gif"
+            base64 -w 1000 "gui_shots/demo_${name}.gif"
+            echo "=====END"
+            rm gui_shots/*_gif_${name}_*.png
+          done
+          for f in gui_shots/*.png; do
+            [ -e "$f" ] || continue
+            convert "$f" -resize 900x900\> -quality 72 /tmp/shot.jpg
+            echo "=====BEGIN $(basename "$f" .png).jpg"
+            base64 -w 1000 /tmp/shot.jpg
+            echo "=====END"
+          done
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4

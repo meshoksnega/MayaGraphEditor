@@ -87,6 +87,23 @@ def install_kind():
     return "LEGACY", None
 
 
+def managed_by_blender():
+    """Name of the remote extensions repository this add-on was installed from
+    (e.g. extensions.blender.org), else None.  Such installs are updated by
+    Blender itself, and the platform doesn't allow add-ons to update themselves,
+    so the GitHub updater switches off."""
+    kind, repo = install_kind()
+    if kind != "EXTENSION":
+        return None
+    try:
+        for r in bpy.context.preferences.extensions.repos:
+            if r.module == repo and r.use_remote_url:
+                return r.name or r.remote_url
+    except Exception:
+        pass
+    return None
+
+
 def pick_asset(assets, kind):
     """Choose the zip to download from a release's asset list."""
     zips = [a for a in assets if a.get("name", "").lower().endswith(".zip")]
@@ -245,7 +262,7 @@ def _ensure_timer():
 
 
 def start_check():
-    if get_state()["status"] in {"CHECKING", "DOWNLOADING"}:
+    if get_state()["status"] in {"CHECKING", "DOWNLOADING"} or managed_by_blender():
         return
     if not online_allowed():
         _set(status="ERROR", message="Online access is off (Preferences > System > Network)")
@@ -329,7 +346,8 @@ def restore_message():
 def maybe_auto_check():
     """Called shortly after startup: at most one automatic check a day."""
     prefs = common.get_prefs()
-    if prefs is None or not prefs.update_auto_check or not online_allowed():
+    if prefs is None or not prefs.update_auto_check or not online_allowed() \
+            or managed_by_blender():
         return None
     if time.time() - prefs.update_last_check >= AUTO_CHECK_INTERVAL:
         start_check()
@@ -376,6 +394,11 @@ _ICONS = {"ERROR": 'ERROR', "AVAILABLE": 'IMPORT', "UP_TO_DATE": 'CHECKMARK',
 def draw_prefs(layout, prefs):
     box = layout.box()
     box.label(text="Updates", icon='FILE_REFRESH')
+    managed = managed_by_blender()
+    if managed:
+        box.label(text="Installed version: %s" % version_str(current_version()))
+        box.label(text="Updates come through Blender's Extensions (%s)." % managed, icon='INFO')
+        return
     st = get_state()
     row = box.row()
     row.label(text="Installed version: %s" % version_str(current_version()))
@@ -400,6 +423,8 @@ def draw_prefs(layout, prefs):
 
 
 def draw_sidebar_notice(layout):
+    if managed_by_blender():
+        return
     st = get_state()
     if st["status"] == "AVAILABLE":
         layout.label(text="Update %s available" % version_str(st["latest"]["version"]), icon='IMPORT')

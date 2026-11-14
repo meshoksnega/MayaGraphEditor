@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "maya_graph_editor"
-version = "1.1.1"
+version = "1.2.0"
 name = "Maya Graph Editor Tools"
-tagline = "Buffer curve, one-click tangents, live simplify and retiming for the Graph Editor"
+tagline = "Maya-style Graph Editor tools: tangents, buffer curve, retiming"
 maintainer = "meshoksnega"
 type = "add-on"
 website = "https://github.com/meshoksnega/MayaGraphEditor"

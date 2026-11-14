@@ -382,7 +382,9 @@ class MGE_PT_ghost(bpy.types.Panel):
         col = layout.column()
         col.prop(st, "ghost_width")
         col.row().prop(st, "ghost_style", expand=True)
-        col.prop(st, "ghost_range", text="Range")
+        row = col.row(align=True)
+        row.label(text="Range")
+        row.prop(st, "ghost_range", text="")
         col.prop(st, "ghost_save")
 
 

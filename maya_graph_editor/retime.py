@@ -1,11 +1,25 @@
-"""Tool 4 - Retiming / lattice tool.
+"""Tool 4 - Region / Retime lattice.
 
-Press "Retime Selection": a lattice (two vertical edges with grips) appears
-around the selected keyframes of *all* curves.  Drag an edge to stretch or
-compress the whole range in time - every selected key (and its handle
-x-lengths) is scaled about the opposite edge, so relative spacing and curve
-shape are preserved.  Later keys can ripple along so nothing collides.
-Enter / button = apply, Esc / right-click = cancel.
+Press "Retime / Region": a box appears around the selected keyframes of all
+curves.
+
+  left / right edge   stretch or compress in time (about the opposite edge)
+  top / bottom edge   scale values (about the opposite edge)
+  corners             both at once
+  inside the box      move (Ctrl = whole frames, Shift = one axis only)
+
+Handles are scaled with their keys, so curve shape is kept.  Values are
+scaled in Graph Editor display space, so curves in degrees or a normalised
+view behave as you see them.  Type a number + Enter to scale time by that
+percentage.  Enter / Apply keeps everything, Esc / Cancel restores.
+
+Scope "Whole Rig" retimes every key of the selected objects (or selected
+bones in Pose Mode) inside the selection's time range, including channels
+that aren't shown; it is time-only.
+
+Panel extras: x0.5 / x2, exact length, fit to preview range or to two
+selected markers, anchor at the playhead, and a value scale % about zero,
+the first / last key or the centre.
 """
 
 import bpy
@@ -13,7 +27,7 @@ import numpy as np
 
 from . import common
 
-GRAB_PX = 10        # how close to an edge (pixels) counts as grabbing it
+GRAB_PX = 10        # how close (pixels) counts as grabbing an edge / corner
 _session = None
 _last_result = None
 
@@ -22,38 +36,87 @@ _last_result = None
 # Maths (no UI)
 # --------------------------------------------------------------------------
 
-def retime_curve(snap, t0, t1, new_t0, new_t1, ripple):
-    """Map selected keys of `snap` from [t0, t1] to [new_t0, new_t1].
+def transform_curve(snap, mask, t0, t1, nt0, nt1, ripple_before=False, ripple_after=False,
+                    vbox=None, mapping=(1.0, 0.0)):
+    """Map the masked keys of `snap` from box (t0..t1, v0..v1) to (nt0..nt1, nv0..nv1).
 
-    Returns (co, hl, hr) arrays.  Handle x-lengths of retimed keys are scaled
-    by the same factor so the shape is only stretched, never distorted.
-    Unselected keys before/after the range move with the edge when `ripple`.
-    """
-    x = snap.co[:, 0]
-    sel = snap.selected
-    scale = (new_t1 - new_t0) / (t1 - t0)
-    nx = x.copy()
-    nx[sel] = new_t0 + (x[sel] - t0) * scale
-    if ripple:
-        nx[(~sel) & (x > t1)] += new_t1 - t1
-        nx[(~sel) & (x < t0)] += new_t0 - t0
-    ratio = np.where(sel, scale, 1.0)
+    vbox = (v0, v1, nv0, nv1) in display units (None = time only);
+    mapping = (scale, offset) with display = (raw + offset) * scale.
+    Unmasked keys after/before the range move with the edge when rippling.
+    Returns (co, hl, hr)."""
+    x, y = snap.co[:, 0], snap.co[:, 1]
+    mask = np.asarray(mask, dtype=bool)
     co, hl, hr = snap.co.copy(), snap.hl.copy(), snap.hr.copy()
+
+    st = (nt1 - nt0) / (t1 - t0) if t1 - t0 > 1e-9 else 1.0
+    nx = x.copy()
+    if t1 - t0 > 1e-9:
+        nx[mask] = nt0 + (x[mask] - t0) * st
+    else:
+        nx[mask] = x[mask] + (nt0 - t0)
+    if ripple_after:
+        nx[(~mask) & (x > t1)] += nt1 - t1
+    if ripple_before:
+        nx[(~mask) & (x < t0)] += nt0 - t0
+    kx = np.where(mask, st, 1.0)
     co[:, 0] = nx
-    hl[:, 0] = nx + (snap.hl[:, 0] - x) * ratio
-    hr[:, 0] = nx + (snap.hr[:, 0] - x) * ratio
+    hl[:, 0] = nx + (snap.hl[:, 0] - x) * kx
+    hr[:, 0] = nx + (snap.hr[:, 0] - x) * kx
+
+    if vbox is not None:
+        v0, v1, nv0, nv1 = vbox
+        scale, off = mapping
+        sv = (nv1 - nv0) / (v1 - v0) if abs(v1 - v0) > 1e-12 else 1.0
+        view = (y + off) * scale
+        if abs(v1 - v0) > 1e-12:
+            nview = nv0 + (view - v0) * sv
+        else:
+            nview = view + (nv0 - v0)
+        ny = np.where(mask, nview / scale - off, y)
+        ky = np.where(mask, sv, 1.0)
+        co[:, 1] = ny
+        hl[:, 1] = ny + (snap.hl[:, 1] - y) * ky
+        hr[:, 1] = ny + (snap.hr[:, 1] - y) * ky
     return co, hl, hr
 
 
-def scaled_range(t0, t1, percent, anchor):
-    """New (t0, t1) for a range scaled to `percent` about 'LEFT'/'CENTER'/'RIGHT'."""
-    width = (t1 - t0) * percent / 100.0
+def retime_curve(snap, t0, t1, new_t0, new_t1, ripple):
+    """Time-only retime of the selected keys (kept for compatibility)."""
+    return transform_curve(snap, snap.selected, t0, t1, new_t0, new_t1,
+                           ripple_before=ripple, ripple_after=ripple)
+
+
+def scale_values(snap, mask, percent, pivot):
+    """Scale masked values by `percent` about 'ZERO' / 'FIRST' / 'LAST' / 'CENTER'."""
+    mask = np.asarray(mask, dtype=bool)
+    y = snap.co[:, 1]
+    if not mask.any():
+        return snap.co.copy(), snap.hl.copy(), snap.hr.copy()
+    ym = y[mask]
+    p = {'ZERO': 0.0, 'FIRST': ym[0], 'LAST': ym[-1],
+         'CENTER': 0.5 * (ym.min() + ym.max())}[pivot]
+    s = percent / 100.0
+    co, hl, hr = snap.co.copy(), snap.hl.copy(), snap.hr.copy()
+    ny = np.where(mask, p + (y - p) * s, y)
+    k = np.where(mask, s, 1.0)
+    co[:, 1] = ny
+    hl[:, 1] = ny + (snap.hl[:, 1] - y) * k
+    hr[:, 1] = ny + (snap.hr[:, 1] - y) * k
+    return co, hl, hr
+
+
+def scaled_range(t0, t1, percent, anchor, playhead=0.0):
+    """New (t0, t1) for a range scaled to `percent` about an anchor."""
+    s = percent / 100.0
     if anchor == 'RIGHT':
-        return t1 - width, t1
-    if anchor == 'CENTER':
-        mid = 0.5 * (t0 + t1)
-        return mid - width / 2.0, mid + width / 2.0
-    return t0, t0 + width
+        p = t1
+    elif anchor == 'CENTER':
+        p = 0.5 * (t0 + t1)
+    elif anchor == 'PLAYHEAD':
+        p = playhead
+    else:
+        p = t0
+    return p + (t0 - p) * s, p + (t1 - p) * s
 
 
 def selection_range(snaps):
@@ -65,77 +128,171 @@ def selection_range(snaps):
 
 
 # --------------------------------------------------------------------------
+# Whole-rig scope
+# --------------------------------------------------------------------------
+
+def rig_fcurves(context):
+    """F-Curves of the selected objects (selected bones only in Pose Mode)."""
+    objs = list(getattr(context, "selected_objects", None) or [])
+    active = getattr(context, "active_object", None)
+    if active is not None and active not in objs:
+        objs.append(active)
+    bone_prefixes = None
+    pose_bones = getattr(context, "selected_pose_bones", None)
+    if active is not None and active.mode == 'POSE' and pose_bones:
+        bone_prefixes = tuple('pose.bones["%s"]' % b.name for b in pose_bones)
+    out, seen = [], set()
+    for obj in objs:
+        ad = obj.animation_data
+        if ad is None or ad.action is None:
+            continue
+        slot = getattr(ad, "action_slot", None)
+        for fc in common.action_fcurves(ad.action, slot):
+            if fc.lock:
+                continue
+            if bone_prefixes is not None and obj == active and \
+                    not fc.data_path.startswith(bone_prefixes):
+                continue
+            key = common.curve_key(fc)
+            if key not in seen:
+                seen.add(key)
+                out.append(fc)
+    return out
+
+
+# --------------------------------------------------------------------------
 # Session
 # --------------------------------------------------------------------------
 
 class CurveState:
-    __slots__ = ("key", "orig", "base")
+    __slots__ = ("key", "orig", "base", "mask", "mapping")
 
 
 class Session:
     def __init__(self, area):
         self.area_ptr = area.as_pointer()
         self.curves = []
-        self.t0 = self.t1 = 0.0          # committed range
-        self.cur_t0 = self.cur_t1 = 0.0  # live range
-        self.drag = None                 # None | 'L' | 'R'
-        self.grab_off = 0.0
+        self.scope = 'SELECTED'
+        self.values = True               # value edges available
+        self.t0 = self.t1 = 0.0          # committed box
+        self.v0 = self.v1 = 0.0
+        self.cur = (0.0, 0.0, 0.0, 0.0)  # live box (t0, t1, v0, v1)
+        self.drag = None                 # None | L R T B TL TR BL BR M
+        self.grab = (0.0, 0.0)
         self.hover = None
         self.handle = None
         self.cursor_window = None
-        self.typed = ""                  # number typed during the modal
+        self.typed = ""
 
 
-def _begin(context):
+def _value_box(curves):
+    vs = []
+    for c in curves:
+        scale, off = c.mapping
+        y = c.base.co[c.mask, 1]
+        if len(y):
+            vs.append((y + off) * scale)
+    if not vs:
+        return 0.0, 0.0
+    allv = np.concatenate(vs)
+    return float(allv.min()), float(allv.max())
+
+
+def _begin(context, scope=None):
+    st = common.get_settings(context)
     ses = Session(context.area)
+    ses.scope = scope or st.retime_scope
+    space, scene = getattr(context, "space_data", None), context.scene
+    visible = []
     for fc in common.editable_fcurves(context):
         snap = common.CurveSnapshot.of(fc)
-        if snap.selected.any():
-            cs = CurveState()
-            cs.key, cs.orig, cs.base = common.curve_key(fc), snap, snap.copy()
-            ses.curves.append(cs)
-    rng = selection_range([c.base for c in ses.curves])
+        visible.append((fc, snap))
+    rng = selection_range([s for _fc, s in visible])
     if rng is None or rng[1] - rng[0] < 1e-4:
         return None
-    ses.t0 = ses.cur_t0 = rng[0]
-    ses.t1 = ses.cur_t1 = rng[1]
+    t0, t1 = rng
+    if ses.scope == 'RIG':
+        ses.values = False
+        for fc in rig_fcurves(context):
+            snap = common.CurveSnapshot.of(fc)
+            mask = (snap.co[:, 0] >= t0 - 1e-6) & (snap.co[:, 0] <= t1 + 1e-6)
+            if mask.any():
+                ses.curves.append(_state(fc, snap, mask, (1.0, 0.0)))
+    else:
+        ses.values = bool(st.region_values)
+        for fc, snap in visible:
+            if snap.selected.any():
+                mapping = common.display_mapping(fc, space, scene) if space else (1.0, 0.0)
+                ses.curves.append(_state(fc, snap, snap.selected, mapping))
+    if not ses.curves:
+        return None
+    ses.t0, ses.t1 = t0, t1
+    ses.v0, ses.v1 = _value_box(ses.curves)
+    ses.cur = (ses.t0, ses.t1, ses.v0, ses.v1)
     return ses
 
 
-def _apply_range(context, new_t0, new_t1, ses=None):
-    ses = ses or _session
-    ripple = common.get_settings(context).retime_ripple
+def _state(fc, snap, mask, mapping):
+    cs = CurveState()
+    cs.key, cs.orig, cs.base = common.curve_key(fc), snap, snap.copy()
+    cs.mask, cs.mapping = np.asarray(mask, dtype=bool), mapping
+    return cs
+
+
+def _lookup(context, ses):
     fmap = common.fcurve_map(context)
+    if ses.scope == 'RIG':
+        for fc in rig_fcurves(context):
+            fmap.setdefault(common.curve_key(fc), fc)
+    return fmap
+
+
+def _apply_box(context, nt0, nt1, nv0=None, nv1=None, ses=None):
+    ses = ses or _session
+    st = common.get_settings(context)
+    ripple = st.retime_ripple
+    drag = ses.drag or ""
+    left_edge = 'L' in drag and drag != 'M'
+    vbox = None
+    if ses.values and nv0 is not None:
+        vbox = (ses.v0, ses.v1, nv0, nv1)
+    fmap = _lookup(context, ses)
     for c in ses.curves:
         fc = fmap.get(c.key)
         if fc is None:
             continue
-        co, hl, hr = retime_curve(c.base, ses.t0, ses.t1, new_t0, new_t1, ripple)
+        co, hl, hr = transform_curve(
+            c.base, c.mask, ses.t0, ses.t1, nt0, nt1,
+            ripple_before=ripple and left_edge, ripple_after=ripple,
+            vbox=vbox, mapping=c.mapping)
         c.base.write(fc, co=co, hl=hl, hr=hr)
-    ses.cur_t0, ses.cur_t1 = new_t0, new_t1
+    ses.cur = (nt0, nt1, ses.v0 if nv0 is None else nv0, ses.v1 if nv1 is None else nv1)
     common.redraw_graph_editors()
 
 
 def _commit(context, ses=None):
     """Make the current state the new base for the next drag."""
     ses = ses or _session
-    fmap = common.fcurve_map(context)
+    fmap = _lookup(context, ses)
     for c in ses.curves:
         fc = fmap.get(c.key)
-        if fc is not None:
-            c.base = common.CurveSnapshot.of(fc)
-    ses.t0, ses.t1 = ses.cur_t0, ses.cur_t1
+        if fc is None:
+            continue
+        c.base = common.CurveSnapshot.of(fc)
+        if ses.scope != 'RIG':  # rig scope keeps its time-range mask
+            c.mask = c.base.selected
+    ses.t0, ses.t1, ses.v0, ses.v1 = ses.cur
     ses.drag = None
 
 
 def _restore_base(context):
     ses = _session
-    fmap = common.fcurve_map(context)
+    fmap = _lookup(context, ses)
     for c in ses.curves:
         fc = fmap.get(c.key)
         if fc is not None:
             c.base.write(fc)
-    ses.cur_t0, ses.cur_t1 = ses.t0, ses.t1
+    ses.cur = (ses.t0, ses.t1, ses.v0, ses.v1)
     ses.drag = None
 
 
@@ -143,18 +300,44 @@ def is_active():
     return _session is not None
 
 
-def scale_selection(context, percent, anchor):
-    """Retime by a typed percentage: inside a lattice session, or directly on
-    the selected keys.  Returns the new range, or None if nothing to do."""
-    ses = _session
+def retime_to(context, new_t0, new_t1):
+    """Retime to an exact range, inside a session or directly on the selection."""
+    ses = _session or _begin(context)
     if ses is None:
-        ses = _begin(context)
-        if ses is None:
-            return None
-    new = scaled_range(ses.t0, ses.t1, percent, anchor)
-    _apply_range(context, new[0], new[1], ses)
+        return None
+    _apply_box(context, new_t0, new_t1, ses=ses)
+    _commit(context, ses)
+    return new_t0, new_t1
+
+
+def scale_selection(context, percent, anchor):
+    """Retime by a percentage about an anchor. Returns the new range or None."""
+    ses = _session or _begin(context)
+    if ses is None:
+        return None
+    new = scaled_range(ses.t0, ses.t1, percent, anchor, float(context.scene.frame_current))
+    _apply_box(context, new[0], new[1], ses=ses)
     _commit(context, ses)
     return new
+
+
+def scale_selection_values(context, percent, pivot):
+    """Scale the values of the session's / selection's keys about a pivot."""
+    ses = _session or _begin(context, scope='SELECTED')
+    if ses is None or ses.scope == 'RIG':
+        return False
+    fmap = _lookup(context, ses)
+    for c in ses.curves:
+        fc = fmap.get(c.key)
+        if fc is not None:
+            co, hl, hr = scale_values(c.base, c.mask, percent, pivot)
+            c.base.write(fc, co=co, hl=hl, hr=hr)
+    ses.cur = (ses.t0, ses.t1, ses.v0, ses.v1)
+    _commit(context, ses)
+    ses.v0, ses.v1 = _value_box(ses.curves)
+    ses.cur = (ses.t0, ses.t1, ses.v0, ses.v1)
+    common.redraw_graph_editors()
+    return True
 
 
 def abort_session():
@@ -181,7 +364,7 @@ def finish(context, apply):
         if ses.drag is not None:
             _commit(context)
     else:
-        fmap = common.fcurve_map(context)
+        fmap = _lookup(context, ses)
         for c in ses.curves:
             fc = fmap.get(c.key)
             if fc is not None:
@@ -203,13 +386,52 @@ def finish(context, apply):
 
 
 # --------------------------------------------------------------------------
-# Drawing
+# Geometry in pixels
 # --------------------------------------------------------------------------
 
 def _frame_to_px(region, tscale, frame):
     ox, _oy, sx, _sy = common.view_affine(region)
     return ox + frame * tscale * sx
 
+
+def _box_px(region, tscale, box):
+    ox, oy, sx, sy = common.view_affine(region)
+    t0, t1, v0, v1 = box
+    xl, xr = ox + t0 * tscale * sx, ox + t1 * tscale * sx
+    yb, yt = oy + v0 * sy, oy + v1 * sy
+    if yt - yb < 16:  # flat selection: give the box some height to grab
+        mid = 0.5 * (yb + yt)
+        yb, yt = mid - 8, mid + 8
+    return xl, xr, yb, yt
+
+
+def hit_test(ses, mx, my, xl, xr, yb, yt):
+    """Which part of the lattice is under (mx, my) in region pixels."""
+    g = GRAB_PX
+    if ses.values:
+        for name, cx, cy in (('TL', xl, yt), ('TR', xr, yt), ('BL', xl, yb), ('BR', xr, yb)):
+            if abs(mx - cx) <= g and abs(my - cy) <= g:
+                return name
+        if xl - g <= mx <= xr + g:
+            if abs(my - yt) <= g:
+                return 'T'
+            if abs(my - yb) <= g:
+                return 'B'
+    dl, dr = abs(mx - xl), abs(mx - xr)
+    if min(dl, dr) <= g:
+        return 'L' if dl < dr else 'R'
+    if xl < mx < xr and (not ses.values or yb < my < yt):
+        return 'M'
+    return None
+
+
+_CURSORS = {'L': 'MOVE_X', 'R': 'MOVE_X', 'T': 'MOVE_Y', 'B': 'MOVE_Y', 'M': 'HAND',
+            'TL': 'SCROLL_XY', 'TR': 'SCROLL_XY', 'BL': 'SCROLL_XY', 'BR': 'SCROLL_XY'}
+
+
+# --------------------------------------------------------------------------
+# Drawing
+# --------------------------------------------------------------------------
 
 def _draw_lattice():
     ses = _session
@@ -220,28 +442,53 @@ def _draw_lattice():
     if region is None or region.type != 'WINDOW':
         return
     try:
+        col = common.ui_colors()
+        accent, active_col = col["accent"], col["active"]
         tscale = common.time_scale(space, scene)
         h = region.height
-        xl = _frame_to_px(region, tscale, ses.cur_t0)
-        xr = _frame_to_px(region, tscale, ses.cur_t1)
-        common.draw_rect(xl, 0, xr, h, (0.35, 0.65, 1.0, 0.10))
-        for edge, x in (('L', xl), ('R', xr)):
-            active = ses.drag == edge or (ses.drag is None and ses.hover == edge)
-            col = (1.0, 0.8, 0.2, 1.0) if active else (0.35, 0.65, 1.0, 1.0)
-            common.draw_polyline([(x, 0), (x, h)], col, 2.0 if active else 1.5)
-            common.draw_rect(x - 6, h / 2 - 22, x + 6, h / 2 + 22, col)
-            common.draw_rect(x - 1, h / 2 - 12, x + 1, h / 2 + 12, (0.1, 0.1, 0.12, 1))
-        width0, width1 = ses.t1 - ses.t0, ses.cur_t1 - ses.cur_t0
-        pct = 100.0 * width1 / width0 if width0 else 100.0
-        label = "RETIME   %.1f → %.1f   (length %.1f → %.1f,  %.0f%%)" % (
-            ses.cur_t0, ses.cur_t1, width0, width1, pct)
-        common.draw_text(max(xl, 12) + 8, h - 24, label, 14, (1, 1, 1, 1))
+        xl, xr, yb, yt = _box_px(region, tscale, ses.cur)
+        common.draw_rect(xl, 0, xr, h, common.with_alpha(accent, 0.08))
+
+        def colour(part):
+            on = ses.drag == part or (ses.drag is None and ses.hover == part)
+            return active_col if on else accent
+
+        for part, x in (('L', xl), ('R', xr)):
+            c = colour(part)
+            common.draw_polyline([(x, 0), (x, h)], c, 2.0 if c is active_col else 1.5)
+            common.draw_rect(x - 6, h / 2 - 22, x + 6, h / 2 + 22, c)
+            common.draw_rect(x - 1, h / 2 - 12, x + 1, h / 2 + 12, col["bg"])
+        if ses.values:
+            inside = colour('M')
+            common.draw_rect(xl, yb, xr, yt, common.with_alpha(inside, 0.10 if inside is accent else 0.18))
+            for part, y in (('T', yt), ('B', yb)):
+                c = colour(part)
+                common.draw_polyline([(xl, y), (xr, y)], c, 2.0 if c is active_col else 1.5)
+                mx = 0.5 * (xl + xr)
+                common.draw_rect(mx - 22, y - 5, mx + 22, y + 5, c)
+            for part, x, y in (('TL', xl, yt), ('TR', xr, yt), ('BL', xl, yb), ('BR', xr, yb)):
+                c = colour(part)
+                common.draw_rect(x - 6, y - 6, x + 6, y + 6, c)
+                common.draw_rect(x - 3, y - 3, x + 3, y + 3, col["bg"])
+
+        t0, t1, v0, v1 = ses.cur
+        w0, w1 = ses.t1 - ses.t0, t1 - t0
+        pct = 100.0 * w1 / w0 if w0 else 100.0
+        title = "RETIME" if ses.scope != 'RIG' else "RETIME (whole rig)"
+        label = "%s   %.1f → %.1f   (length %.1f → %.1f, %.0f%%)" % (
+            title, t0, t1, w0, w1, pct)
+        if ses.values and abs(ses.v1 - ses.v0) > 1e-9:
+            label += "   values %.0f%%" % (100.0 * (v1 - v0) / (ses.v1 - ses.v0))
+        tx = min(max(xl, 12) + 8, max(region.width - 520, 12))
+        common.draw_rect(tx - 6, h - 32, tx + common.text_width(label, 14) + 8, h - 10, col["bg"])
+        common.draw_text(tx, h - 26, label, 14, col["text"])
         if ses.typed:
-            common.draw_text(max(xl, 12) + 8, h - 44, "Scale: %s%%  (Enter = apply)" % ses.typed,
-                             14, (1.0, 0.8, 0.2, 1))
-        common.draw_text(12, 10, "drag an edge to stretch / compress · type a % · Ctrl = snap to "
-                         "frames · Enter = apply · Esc = cancel", 11,
-                         (0.75, 0.75, 0.78, 1))
+            common.draw_text(tx, h - 48, "Scale time: %s%%  (Enter = apply)" % ses.typed,
+                             14, active_col)
+        hint = ("drag edges: time / values · corners: both · inside: move (Shift = one axis) "
+                "· Ctrl = whole frames · type a % · Enter = apply · Esc = cancel")
+        common.draw_rect(6, 4, 14 + common.text_width(hint, 11), 24, col["bg"])
+        common.draw_text(12, 10, hint, 11, col["dim"])
     except Exception:
         common.log_exception("retime draw")
 
@@ -252,9 +499,10 @@ def _draw_lattice():
 
 class MGE_OT_retime(bpy.types.Operator):
     bl_idname = "mge.retime"
-    bl_label = "Retime Selection"
-    bl_description = ("Show a draggable lattice around the selected keyframes "
-                      "(across all curves) to stretch or compress them in time")
+    bl_label = "Retime / Region"
+    bl_description = ("Show a lattice around the selected keyframes (across all curves): "
+                      "drag its edges to retime or scale values, its corners for both, "
+                      "inside to move")
     bl_options = {'UNDO', 'BLOCKING'}
 
     @classmethod
@@ -274,7 +522,8 @@ class MGE_OT_retime(bpy.types.Operator):
         ses.cursor_window = context.window
         _session = ses
         context.workspace.status_text_set(
-            "Retime: drag an edge   Ctrl: snap to frames   Enter: apply   Esc/RMB: cancel")
+            "Region: drag edges / corners / inside   Ctrl: whole frames   Shift: one axis   "
+            "type %: scale time   Enter: apply   Esc/RMB: cancel")
         context.window_manager.modal_handler_add(self)
         common.redraw_graph_editors()
         return {'RUNNING_MODAL'}
@@ -289,11 +538,11 @@ class MGE_OT_retime(bpy.types.Operator):
             finish(context, apply=False)
             return {'CANCELLED'}
 
-    def _mouse_frame(self, context, region, event):
+    def _mouse(self, context, region, event):
         scene, space = context.scene, context.space_data
         mx, my = event.mouse_x - region.x, event.mouse_y - region.y
-        vx = region.view2d.region_to_view(mx, my)[0]
-        return vx / common.time_scale(space, scene), mx
+        vx, vy = region.view2d.region_to_view(mx, my)
+        return vx / common.time_scale(space, scene), vy, mx, my
 
     def _modal(self, context, event):
         ses = _session
@@ -345,14 +594,13 @@ class MGE_OT_retime(bpy.types.Operator):
             ses.hover = None
             return {'PASS_THROUGH'}
 
-        frame, mx = self._mouse_frame(context, region, event)
+        frame, vy, mx, my = self._mouse(context, region, event)
         tscale = common.time_scale(context.space_data, context.scene)
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and not dragging:
             if ses.hover:
                 ses.drag = ses.hover
-                edge = ses.t1 if ses.drag == 'R' else ses.t0
-                ses.grab_off = frame - edge
+                ses.grab = (frame, vy, mx, my)
             return {'RUNNING_MODAL'}
 
         if event.type == 'LEFTMOUSE' and event.value == 'RELEASE' and dragging:
@@ -361,26 +609,15 @@ class MGE_OT_retime(bpy.types.Operator):
 
         if event.type == 'MOUSEMOVE':
             if dragging:
-                st = common.get_settings(context)
-                min_len = max((ses.t1 - ses.t0) * 0.02, 0.01)
-                target = frame - ses.grab_off
-                if event.ctrl or st.retime_snap:
-                    target = round(target)
-                if ses.drag == 'R':
-                    _apply_range(context, ses.t0, max(target, ses.t0 + min_len))
-                else:
-                    _apply_range(context, min(target, ses.t1 - min_len), ses.t1)
+                self._drag(context, ses, frame, vy, mx, my, event)
             else:
-                dl = abs(mx - _frame_to_px(region, tscale, ses.cur_t0))
-                dr = abs(mx - _frame_to_px(region, tscale, ses.cur_t1))
-                hover = None
-                if min(dl, dr) <= GRAB_PX:
-                    hover = 'L' if dl < dr else 'R'
+                xl, xr, yb, yt = _box_px(region, tscale, ses.cur)
+                hover = hit_test(ses, mx, my, xl, xr, yb, yt)
                 if hover != ses.hover:
                     ses.hover = hover
                     common.redraw_graph_editors()
                 try:
-                    context.window.cursor_set('MOVE_X' if hover else 'DEFAULT')
+                    context.window.cursor_set(_CURSORS.get(hover, 'DEFAULT'))
                 except Exception:
                     pass
             return {'RUNNING_MODAL'}
@@ -389,24 +626,66 @@ class MGE_OT_retime(bpy.types.Operator):
             return {'PASS_THROUGH'}
         return {'RUNNING_MODAL'}
 
+    def _drag(self, context, ses, frame, vy, mx, my, event):
+        st = common.get_settings(context)
+        gf, gv, gmx, gmy = ses.grab
+        t0, t1, v0, v1 = ses.t0, ses.t1, ses.v0, ses.v1
+        snap = event.ctrl or st.retime_snap
+        part = ses.drag
+        nt0, nt1, nv0, nv1 = t0, t1, v0, v1
+        if part == 'M':
+            dt, dv = frame - gf, vy - gv
+            if event.shift:  # lock to the axis that moved most on screen
+                if abs(mx - gmx) >= abs(my - gmy):
+                    dv = 0.0
+                else:
+                    dt = 0.0
+            if snap:
+                dt = round(dt)
+            nt0, nt1 = t0 + dt, t1 + dt
+            if ses.values:
+                nv0, nv1 = v0 + dv, v1 + dv
+        else:
+            min_len = max((t1 - t0) * 0.02, 0.01)
+            if 'R' in part:
+                target = t1 + frame - gf
+                nt1 = max(round(target) if snap else target, t0 + min_len)
+            if 'L' in part:
+                target = t0 + frame - gf
+                nt0 = min(round(target) if snap else target, t1 - min_len)
+            if ses.values and (abs(v1 - v0) > 1e-12):
+                min_h = abs(v1 - v0) * 0.02
+                if 'T' in part:
+                    nv1 = max(v1 + vy - gv, v0 + min_h)
+                if 'B' in part:
+                    nv0 = min(v0 + vy - gv, v1 - min_h)
+        if ses.values:
+            _apply_box(context, nt0, nt1, nv0, nv1)
+        else:
+            _apply_box(context, nt0, nt1)
+
 
 _TYPED_KEYS = {**{n: str(i) for i, n in enumerate(
     ("ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"))},
     **{"NUMPAD_%d" % i: str(i) for i in range(10)}, "PERIOD": ".", "NUMPAD_PERIOD": "."}
 
 
+def _poll_tool(context):
+    return common.graph_poll(context) and common.modal_owner() in (None, "retime")
+
+
 class MGE_OT_retime_scale(bpy.types.Operator):
     bl_idname = "mge.retime_scale"
     bl_label = "Scale Time"
-    bl_description = ("Stretch or compress the selected keys (or the open lattice) to the "
-                      "percentage set in the panel, about the chosen anchor")
+    bl_description = ("Stretch or compress the selected keys (or the open lattice) by a "
+                      "percentage, about the chosen anchor")
     bl_options = {'REGISTER', 'UNDO'}
 
     percent: bpy.props.FloatProperty(name="Scale", default=-1.0, subtype='PERCENTAGE')
 
     @classmethod
     def poll(cls, context):
-        return common.graph_poll(context) and common.modal_owner() in (None, "retime")
+        return _poll_tool(context)
 
     def execute(self, context):
         st = common.get_settings(context)
@@ -417,10 +696,85 @@ class MGE_OT_retime_scale(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class MGE_OT_retime_length(bpy.types.Operator):
+    bl_idname = "mge.retime_length"
+    bl_label = "Set Length"
+    bl_description = "Retime the selection to exactly this many frames, about the chosen anchor"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return _poll_tool(context)
+
+    def execute(self, context):
+        st = common.get_settings(context)
+        ses = _session or _begin(context)
+        if ses is None or ses.t1 - ses.t0 < 1e-6:
+            self.report({'WARNING'}, "Select keyframes spanning at least two different frames")
+            return {'CANCELLED'}
+        pct = 100.0 * st.retime_length / (ses.t1 - ses.t0)
+        new = scaled_range(ses.t0, ses.t1, pct, st.retime_anchor, float(context.scene.frame_current))
+        _apply_box(context, new[0], new[1], ses=ses)
+        _commit(context, ses)
+        return {'FINISHED'}
+
+
+class MGE_OT_retime_fit(bpy.types.Operator):
+    bl_idname = "mge.retime_fit"
+    bl_label = "Fit"
+    bl_description = "Retime the selection to fill a frame range exactly"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    target: bpy.props.EnumProperty(items=(
+        ('PREVIEW', "Preview Range", "The preview range (or the scene range if none)"),
+        ('MARKERS', "Selected Markers", "Between the first and last selected marker"),
+    ))
+
+    @classmethod
+    def poll(cls, context):
+        return _poll_tool(context)
+
+    def execute(self, context):
+        scene = context.scene
+        if self.target == 'MARKERS':
+            frames = sorted(m.frame for m in scene.timeline_markers if m.select)
+            if len(frames) < 2:
+                self.report({'WARNING'}, "Select two markers first")
+                return {'CANCELLED'}
+            a, b = frames[0], frames[-1]
+        elif scene.use_preview_range:
+            a, b = scene.frame_preview_start, scene.frame_preview_end
+        else:
+            a, b = scene.frame_start, scene.frame_end
+        if retime_to(context, float(a), float(b)) is None:
+            self.report({'WARNING'}, "Select keyframes spanning at least two different frames")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
+class MGE_OT_region_value_scale(bpy.types.Operator):
+    bl_idname = "mge.region_value_scale"
+    bl_label = "Scale Values"
+    bl_description = "Scale the values of the selected keys by a percentage about a pivot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return _poll_tool(context)
+
+    def execute(self, context):
+        st = common.get_settings(context)
+        if not scale_selection_values(context, st.region_value_percent, st.region_pivot):
+            self.report({'WARNING'}, "Select keyframes (value scaling is not available for "
+                        "the whole-rig scope)")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
 class MGE_OT_retime_confirm(bpy.types.Operator):
     bl_idname = "mge.retime_confirm"
     bl_label = "Apply"
-    bl_description = "Keep the retimed keyframes"
+    bl_description = "Keep the result"
     bl_options = {'UNDO', 'INTERNAL'}
 
     @classmethod
@@ -452,7 +806,7 @@ class MGE_OT_retime_cancel(bpy.types.Operator):
 # --------------------------------------------------------------------------
 
 class MGE_PT_retime(bpy.types.Panel):
-    bl_label = "Retime"
+    bl_label = "Retime / Region"
     bl_idname = "MGE_PT_retime"
     bl_space_type = 'GRAPH_EDITOR'
     bl_region_type = 'UI'
@@ -466,16 +820,17 @@ class MGE_PT_retime(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         st = common.get_settings(context)
+        layout.row().prop(st, "retime_scope", expand=True)
         col = layout.column(align=True)
         col.prop(st, "retime_ripple")
         col.prop(st, "retime_snap")
-        row = layout.row(align=True)
-        row.prop(st, "retime_percent", text="")
-        row.prop(st, "retime_anchor", text="")
-        row.operator("mge.retime_scale", text="", icon='CHECKMARK')
+        sub = col.row()
+        sub.active = st.retime_scope != 'RIG'
+        sub.prop(st, "region_values")
+
         if is_active():
             ses = _session
-            w0, w1 = ses.t1 - ses.t0, ses.cur_t1 - ses.cur_t0
+            w0, w1 = ses.t1 - ses.t0, ses.cur[1] - ses.cur[0]
             layout.label(text="%.1f → %.1f frames (%.0f%%)" % (
                 w0, w1, 100.0 * w1 / w0 if w0 else 100.0))
             row = layout.row(align=True)
@@ -486,10 +841,34 @@ class MGE_PT_retime(bpy.types.Panel):
             row = layout.row()
             row.scale_y = 1.3
             row.operator("mge.retime", icon='ARROW_LEFTRIGHT')
-            layout.label(text="Select keys on one or more curves.")
+
+        box = layout.box()
+        box.label(text="Time", icon='TIME')
+        box.prop(st, "retime_anchor", text="Anchor")
+        row = box.row(align=True)
+        row.prop(st, "retime_percent", text="")
+        row.operator("mge.retime_scale", text="", icon='CHECKMARK')
+        row = box.row(align=True)
+        row.operator("mge.retime_scale", text="×0.5").percent = 50.0
+        row.operator("mge.retime_scale", text="×2").percent = 200.0
+        row = box.row(align=True)
+        row.prop(st, "retime_length", text="Length")
+        row.operator("mge.retime_length", text="", icon='CHECKMARK')
+        row = box.row(align=True)
+        row.operator("mge.retime_fit", text="Fit Preview Range").target = 'PREVIEW'
+        row.operator("mge.retime_fit", text="Fit Markers").target = 'MARKERS'
+
+        box = layout.box()
+        box.active = st.retime_scope != 'RIG'
+        box.label(text="Values", icon='FCURVE')
+        box.prop(st, "region_pivot", text="Pivot")
+        row = box.row(align=True)
+        row.prop(st, "region_value_percent", text="")
+        row.operator("mge.region_value_scale", text="", icon='CHECKMARK')
 
 
-classes = (MGE_OT_retime, MGE_OT_retime_scale, MGE_OT_retime_confirm, MGE_OT_retime_cancel,
+classes = (MGE_OT_retime, MGE_OT_retime_scale, MGE_OT_retime_length, MGE_OT_retime_fit,
+           MGE_OT_region_value_scale, MGE_OT_retime_confirm, MGE_OT_retime_cancel,
            MGE_PT_retime)
 
 

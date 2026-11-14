@@ -18,38 +18,29 @@ buried in a menu.
 * Key Stats tool: frame / value fields for the selection, absolute or relative, degrees for rotation.
 * Ghost slots A/B/C with their own colours, scene-range sampling, dashed style.
 
-## Still open from Phases 0 and 1
+## Done in 1.2.0 (Phase 2 and Phase 3)
 
-| Item | Why | Effort |
+* Region lattice: value edges, corners and move on top of the retime lattice; value scale % about zero / first /
+  last / centre; x0.5 / x2, exact length, fit to preview range or markers, playhead anchor; whole-rig scope.
+* Tween / breakdown slider with overshoot and key-at-playhead; Smooth with live preview (Gaussian-weighted line fit);
+  Time Warp (ease in / out / in-out); one-click mocap cleanup. All share one live-preview slider framework.
+* Docs with screenshots and GIFs recorded by the GUI tests; Russian and Spanish UI; theme-aware colours;
+  updater steps aside for extensions.blender.org installs; Blender's extension validator runs in CI. It caught an
+  over-long tagline that would have failed submission.
+* Visual check from real screenshots led to new ghost colours (no longer confused with the blue Z channel) and
+  sidebar labels that don't clip.
+
+## Still open
+
+| Item | Notes | Effort |
 |---|---|---|
-| Hands-on look at the overlays by an animator | CI screenshots are blank under Xvfb, so appearance hasn't been inspected | S |
+| Submit to extensions.blender.org | Prepared and validated; the submission itself is the maintainer's | S |
+| An animator's hands-on feedback | Everything is tested, but feel is best judged by use | S |
 | Verify ghosts with NLA time mapping and the *seconds* display | Assumed, not tested | S |
-
-## Phase 2 - Bigger tools
-
-| Item | Notes | Effort |
-|---|---|---|
-| **Value lattice**: retime lattice gets top/bottom edges to scale values about a pivot (zero, first key, last key, centre) | Maya region/lattice tool, both axes | M |
-| **2D region manipulator**: corner grips scale time and value together, middle drag moves | Maya Region Tool | M |
-| **Tween / Breakdown slider** with live preview, built on the Simplify preview machinery (favour previous ↔ next, overshoot) *(Blender has Breakdown/Blend operators; this unifies them in one panel)* | Tween Machine | M |
-| **Smooth with live preview** (Butterworth / Gaussian), same confirm/cancel pattern | Curves > Smooth | M |
-| **Mocap cleanup workflow**: bake to every frame → simplify → Clamped tangents, as one button | Bake + Simplify | M |
-| **Retime around the playhead / to N frames / presets** (×0.5, ×2, fit to marker range) | Scale Keys options | S |
-| **Retime across the whole rig**, not only the visible curves (all channels of selected objects/bones) | Time Editor style | M |
-| **Non-linear time warp**: a warp curve that eases timing in and out over a range | Time Editor / warp | L |
-
-## Phase 3 - Polish and distribution
-
-| Item | Notes | Effort |
-|---|---|---|
-| Documentation with GIFs per tool | Adoption | S |
-| UI translations | - | M |
-| Publish on extensions.blender.org | The platform does its own updates and doesn't allow self-updaters, so the GitHub updater must turn itself off when installed from the official repository (detect the repo's remote URL) | S |
-| Theme-aware colours (ghost/lattice colours from the Graph Editor theme) | Fits dark/light themes | S |
+| Translate runtime-built strings (key counts) and more languages | Framework in `i18n.py` | S |
+| Region lattice re-reads the display mapping during drags | Matters only with *Normalize* on | S |
 
 ## Suggested order
 
-1. ~~Phase 0 test pass and fixes, shortcuts and pie menu~~ and ~~Phase 1 quick wins~~: done in v1.1.
-2. Get v1.1 into an animator's hands and fix what they notice.
-3. Value lattice and region manipulator (v1.2), since they reuse the retime lattice.
-4. Tween and Smooth sliders on the live-preview pattern (v1.3).
+1. ~~Phases 0 and 1~~ (v1.1) and ~~Phases 2 and 3~~ (v1.2): done.
+2. Get v1.2 into animators' hands, fix what they notice, then submit to extensions.blender.org.
