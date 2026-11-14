@@ -165,11 +165,10 @@ class MGE_PT_stats(bpy.types.Panel):
         col.prop(st, "stats_frame", text="Frame")
         col.prop(st, "stats_value", text="Value")
         n_keys = len(frames)
-        info = "%d key%s on %d curve%s" % (n_keys, "" if n_keys == 1 else "s",
-                                           len(sel), "" if len(sel) == 1 else "s")
+        layout.label(text="%d key%s, %d curve%s" % (n_keys, "" if n_keys == 1 else "s",
+                                                   len(sel), "" if len(sel) == 1 else "s"))
         if st.stats_mode == 'ABSOLUTE' and max(values) - min(values) > 1e-6:
-            info += " (values differ: showing average)"
-        layout.label(text=info)
+            layout.label(text="Values differ: average shown", icon='INFO')
         if value_scale(sel, context.scene) != 1.0:
             layout.label(text="Rotation shown in degrees", icon='INFO')
 

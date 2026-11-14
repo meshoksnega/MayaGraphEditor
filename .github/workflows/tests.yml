@@ -61,6 +61,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/scripts/addons"
           ln -s "$GITHUB_WORKSPACE/maya_graph_editor" "$RUNNER_TEMP/scripts/addons/maya_graph_editor"
+      - name: Validate the extension manifest (Blender's own checker)
+        run: ./blender/blender --factory-startup --command extension validate maya_graph_editor
       - name: Run GUI tests
         env:
           BLENDER_USER_SCRIPTS: ${{ runner.temp }}/scripts
@@ -72,6 +74,15 @@ jobs:
       - name: Print screenshots into the log (small JPEGs, base64)
         if: always() && matrix.blender == '5.1.0'
         run: |
+          for name in tween smooth warp region; do
+            ls gui_shots/*_gif_${name}_*.png >/dev/null 2>&1 || continue
+            convert -delay 45 -loop 0 gui_shots/*_gif_${name}_*.png -resize 640x640\> \
+              -colors 128 -layers Optimize "gui_shots/demo_${name}.gif"
+            echo "=====BEGIN demo_${name}.gif"
+            base64 -w 1000 "gui_shots/demo_${name}.gif"
+            echo "=====END"
+            rm gui_shots/*_gif_${name}_*.png
+          done
           for f in gui_shots/*.png; do
             [ -e "$f" ] || continue
             convert "$f" -resize 900x900\> -quality 72 /tmp/shot.jpg

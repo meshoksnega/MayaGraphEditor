@@ -321,7 +321,9 @@ class MGE_PT_tangents(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("mge.break_tangents", icon='UNLINKED')
         row.operator("mge.unify_tangents", icon='LINKED')
-        layout.prop(st, "new_key_tangent", text="New Keys")
+        row = layout.row(align=True)
+        row.label(text="New Keys")
+        row.prop(st, "new_key_tangent", text="")
 
 
 class MGE_MT_tangent_pie(bpy.types.Menu):

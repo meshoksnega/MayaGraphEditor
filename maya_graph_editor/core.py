@@ -7,7 +7,7 @@ unregisters its operators, panel and draw handlers entirely.
 
 import bpy
 
-from . import (cleanup, common, curves, ghost, keymaps, retime, simplify, slider, smooth, stats,
+from . import (cleanup, common, curves, ghost, i18n, keymaps, retime, simplify, slider, smooth, stats,
                tangents, tween, updater, warp)
 
 # Registration order == panel order (the panels also set bl_order).
@@ -81,7 +81,10 @@ def _redraw(_self=None, _context=None):
     common.redraw_graph_editors()
 
 
-_GHOST_COLORS = {"a": (0.55, 0.8, 1.0, 0.6), "b": (1.0, 0.6, 0.25, 0.6), "c": (0.55, 1.0, 0.5, 0.6)}
+# Neutral grey like Maya's buffer curve, then orange and magenta: none of them
+# can be mistaken for Blender's red / green / blue X, Y, Z channel colours.
+_GHOST_COLORS = {"a": (0.85, 0.85, 0.85, 0.55), "b": (1.0, 0.55, 0.15, 0.65),
+                 "c": (0.95, 0.35, 0.95, 0.65)}
 
 
 class MGE_Settings(bpy.types.PropertyGroup):
@@ -178,8 +181,30 @@ class MGE_Settings(bpy.types.PropertyGroup):
     retime_anchor: bpy.props.EnumProperty(
         name="Anchor", items=[('LEFT', "Start", "Keep the first selected key in place"),
                               ('CENTER', "Center", "Scale about the middle of the range"),
-                              ('RIGHT', "End", "Keep the last selected key in place")],
+                              ('RIGHT', "End", "Keep the last selected key in place"),
+                              ('PLAYHEAD', "Playhead", "Scale about the current frame")],
         default='LEFT')
+    retime_scope: bpy.props.EnumProperty(
+        name="Scope",
+        items=[('SELECTED', "Selected Keys", "The selected keys of the curves shown"),
+               ('RIG', "Whole Rig", "Every key of the selected objects (selected bones in Pose "
+                                    "Mode) inside the selection's time range, shown or not")],
+        default='SELECTED')
+    retime_length: bpy.props.FloatProperty(
+        name="Length", default=24.0, min=0.01, precision=1,
+        description="Target length in frames")
+    region_values: bpy.props.BoolProperty(
+        name="Value Handles", default=True,
+        description="Show top/bottom edges and corners to scale values in the lattice")
+    region_value_percent: bpy.props.FloatProperty(
+        name="Value Scale", default=100.0, soft_min=-200.0, soft_max=400.0, subtype='PERCENTAGE',
+        description="Scale the selected keys' values by this percentage about the pivot")
+    region_pivot: bpy.props.EnumProperty(
+        name="Pivot", items=[('ZERO', "Zero", "Scale about value 0"),
+                             ('FIRST', "First Key", "Scale about each curve's first selected key"),
+                             ('LAST', "Last Key", "Scale about each curve's last selected key"),
+                             ('CENTER', "Center", "Scale about the middle of each curve's selection")],
+        default='CENTER')
 
     simplify_tolerance: bpy.props.FloatProperty(
         name="Tolerance", default=2.0, min=0.0, max=100.0, soft_max=25.0,
@@ -286,6 +311,7 @@ def register():
     for cls in _core_classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.mge_settings = bpy.props.PointerProperty(type=MGE_Settings)
+    i18n.register()
     if _on_load_pre not in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.append(_on_load_pre)
     updater.restore_message()
@@ -296,6 +322,7 @@ def register():
 
 
 def unregister():
+    i18n.unregister()
     keymaps.remove_all()
     for name, module, _label in reversed(TOOLS):
         if name in _active:

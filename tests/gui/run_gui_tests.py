@@ -133,10 +133,19 @@ def view_all():
 
 def sequence():
     print("Blender", bpy.app.version_string, flush=True)
+    # close the splash screen so it doesn't cover the screenshots
+    bpy.context.preferences.view.show_splash = False
+    yield 0.5
+    w = win()
+    ev('ESC', 'PRESS', 5, 5)
+    ev('ESC', 'RELEASE', 5, 5)
+    ev('LEFTMOUSE', 'PRESS', 5, w.height - 5)
+    ev('LEFTMOUSE', 'RELEASE', 5, w.height - 5)
+    yield 0.3
     mod = addon_utils.enable("maya_graph_editor", default_set=True)
     check(mod is not None, "add-on enabled")
     yield 0.2
-    from maya_graph_editor import common, ghost, retime, simplify, keymaps  # noqa: F401
+    from maya_graph_editor import common, ghost, retime, simplify, keymaps, slider  # noqa: F401
     logged = []
     real_log = common.log_exception
 
@@ -383,6 +392,158 @@ def sequence():
     frames_now = [k.co[0] for k in fc.keyframe_points]
     check(abs((frames_now[3] - frames_now[1]) - span_before / 2) < 0.5,
           "typing 50 + Enter halved the range: %s" % frames_now)
+
+    # ---------------------------------------------------------- slider tools
+    st = bpy.context.scene.mge_settings
+    r = region_of(graph_area(), 'WINDOW')
+    cx, cy = r.x + r.width // 3, r.y + r.height // 2
+
+    def reset_curve(points, selected):
+        fc.keyframe_points.clear()
+        for f, v in points:
+            fc.keyframe_points.insert(f, v)
+        for i, k in enumerate(fc.keyframe_points):
+            on = i in selected
+            k.select_control_point = k.select_left_handle = k.select_right_handle = on
+        view_all()
+
+    print("tween modal", flush=True)
+    reset_curve([(1, 0), (11, 2), (21, 5), (31, 10)], {1, 2})
+    yield 0.3
+    st.tween_bias = 50.0
+    ev('MOUSEMOVE', 'NOTHING', cx, cy)
+    yield 0.1
+    with override():
+        res = bpy.ops.mge.tween('INVOKE_DEFAULT')
+    check(res == {'RUNNING_MODAL'}, "tween started")
+    yield 0.2
+    check(all(abs(fc.keyframe_points[i].co[1] - 5.0) < 1e-4 for i in (1, 2)),
+          "tween 50%% puts both keys halfway between 0 and 10")
+    for i in range(1, 7):
+        ev('MOUSEMOVE', 'NOTHING', cx + i * 25, cy)
+        yield 0.05
+        shot("gif_tween_%02d" % i)
+    v_drag = fc.keyframe_points[1].co[1]
+    check(v_drag > 5.0 and st.tween_bias > 50, "dragging right moves towards the next key (%.2f, %.0f%%)"
+          % (v_drag, st.tween_bias))
+    key('RET')
+    yield 0.3
+    check(not slider._session and abs(fc.keyframe_points[1].co[1] - v_drag) < 1e-4, "Enter kept the tween")
+
+    print("smooth modal", flush=True)
+    import math as _m
+    reset_curve([(f, _m.sin(f / 6.0) * 2 + (0.6 if f % 2 else -0.6)) for f in range(1, 61)],
+                set(range(60)))
+    yield 0.3
+    before = keys_of(fc)
+    st.smooth_sigma = 0.0
+    with override():
+        bpy.ops.mge.smooth('INVOKE_DEFAULT')
+    yield 0.2
+    for i in range(1, 7):
+        ev('MOUSEMOVE', 'NOTHING', cx + i * 20, cy)
+        yield 0.05
+        shot("gif_smooth_%02d" % i)
+    rough = sum(abs(fc.keyframe_points[i + 1].co[1] - fc.keyframe_points[i].co[1]) for i in range(58))
+    rough0 = sum(abs(before[i + 1][1] - before[i][1]) for i in range(58))
+    check(st.smooth_sigma > 0 and rough < rough0 * 0.5, "dragging smooths the jitter (%.1f -> %.1f)"
+          % (rough0, rough))
+    shot("09_smooth_preview")
+    key('ESC')
+    yield 0.3
+    check(keys_of(fc) == before, "Esc restored the jittery keys")
+
+    print("time warp modal", flush=True)
+    reset_curve([(f, (f % 10) / 3.0) for f in range(1, 42, 4)], set(range(11)))
+    yield 0.3
+    st.warp_shape = 'EASE_IN_OUT'
+    st.warp_amount = 0.0
+    with override():
+        bpy.ops.mge.warp('INVOKE_DEFAULT')
+    yield 0.2
+    for i in range(1, 7):
+        ev('MOUSEMOVE', 'NOTHING', cx + i * 30, cy)
+        yield 0.05
+        shot("gif_warp_%02d" % i)
+    xs = [k.co[0] for k in fc.keyframe_points]
+    check(xs[0] == 1 and xs[-1] == 41 and xs[1] < 5 and xs[-2] > 37,
+          "ease in/out bunches keys at both ends, ends fixed: %s" % [round(x, 1) for x in xs])
+    key('RET')
+    yield 0.3
+
+    # ---------------------------------------------------------- region lattice: values and move
+    print("region lattice", flush=True)
+    reset_curve([(1, 0), (11, 1), (21, 3), (31, 2), (41, 0)], {1, 2, 3})
+    yield 0.3
+    st.retime_ripple = True
+    st.region_values = True
+    with override():
+        bpy.ops.mge.retime('INVOKE_DEFAULT')
+    yield 0.2
+    r = region_of(graph_area(), 'WINDOW')
+    ox, oy, sx, sy = common.view_affine(r)
+    top_y = r.y + oy + 3.0 * sy
+    mid_x = r.x + ox + 21.0 * sx
+    ev('MOUSEMOVE', 'NOTHING', mid_x, top_y)
+    yield 0.1
+    check(retime._session.hover == 'T', "hovering the top (value) edge: %s" % retime._session.hover)
+    shot("10_region_hover_top")
+    ev('LEFTMOUSE', 'PRESS', mid_x, top_y)
+    yield 0.05
+    target_y = r.y + oy + 5.0 * sy
+    for i in range(1, 7):
+        ev('MOUSEMOVE', 'NOTHING', mid_x, top_y + (target_y - top_y) * i / 6)
+        yield 0.04
+        shot("gif_region_%02d" % i)
+    ev('LEFTMOUSE', 'RELEASE', mid_x, target_y)
+    yield 0.1
+    vals = [round(k.co[1], 2) for k in fc.keyframe_points]
+    check(abs(vals[2] - 5.0) < 0.15 and abs(vals[1] - 1.0) < 0.05 and vals[0] == 0,
+          "top edge to value 5 scaled values about the bottom edge: %s" % vals)
+    # move the block by dragging inside: +10 frames
+    box_mid_y = r.y + oy + 2.5 * sy
+    x_in = r.x + ox + 16.0 * sx
+    ev('MOUSEMOVE', 'NOTHING', x_in, box_mid_y)
+    yield 0.1
+    check(retime._session.hover == 'M', "inside the box -> move: %s" % retime._session.hover)
+    ev('LEFTMOUSE', 'PRESS', x_in, box_mid_y)
+    yield 0.05
+    x_to = r.x + ox + 26.0 * sx
+    for i in range(1, 5):
+        ev('MOUSEMOVE', 'NOTHING', x_in + (x_to - x_in) * i / 4, box_mid_y, ctrl=True, shift=True)
+        yield 0.04
+    ev('LEFTMOUSE', 'RELEASE', x_to, box_mid_y)
+    yield 0.1
+    xs = [k.co[0] for k in fc.keyframe_points]
+    vals2 = [round(k.co[1], 2) for k in fc.keyframe_points]
+    check(xs == [1, 21, 31, 41, 51] and vals2 == vals,
+          "Ctrl+Shift drag moved +10 whole frames, values locked, later key rippled: %s" % xs)
+    shot("11_region_moved")
+    key('RET')
+    yield 0.2
+    check(not retime.is_active(), "region applied")
+
+    print("cleanup", flush=True)
+    reset_curve([(f, _m.sin(f / 9.0) * 3) for f in range(1, 121)], set(range(120)))
+    yield 0.2
+    with override('UI'):
+        res = bpy.ops.mge.cleanup()
+    check(res == {'FINISHED'} and len(fc.keyframe_points) < 40,
+          "one-click cleanup: 120 -> %d keys" % len(fc.keyframe_points))
+
+    print("translation", flush=True)
+    view = bpy.context.preferences.view
+    try:
+        old = (view.language, view.use_translate_interface)
+        view.language = 'ru_RU'
+        view.use_translate_interface = True
+        got = bpy.app.translations.pgettext_iface("Snapshot")
+        check(got == "Снимок", "Russian UI label: %s" % got)
+        yield 0.2
+        shot("12_sidebar_russian", area_only=False)
+        view.language, view.use_translate_interface = old
+    except Exception as e:
+        check(False, "language switch failed: %s" % e)
 
     # ---------------------------------------------------------- panels / prefs drawn
     print("panels", flush=True)

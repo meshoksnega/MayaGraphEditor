@@ -137,6 +137,24 @@ def curve_key(fc):
     return (idb.name_full if idb is not None else "", fc.data_path, fc.array_index)
 
 
+def action_fcurves(action, slot=None):
+    """F-Curves of an action: slotted (4.4+/5.x, optionally one slot) or legacy."""
+    if hasattr(action, "layers"):
+        out = []
+        for layer in action.layers:
+            for strip in layer.strips:
+                if slot is not None and hasattr(strip, "channelbag"):
+                    cb = strip.channelbag(slot)
+                    if cb is not None:
+                        out.extend(cb.fcurves)
+                else:
+                    for cb in getattr(strip, "channelbags", []):
+                        out.extend(cb.fcurves)
+        if out or not hasattr(action, "fcurves"):
+            return out
+    return list(getattr(action, "fcurves", []))
+
+
 def fcurve_map(context):
     return {curve_key(fc): fc for fc in editable_fcurves(context)}
 

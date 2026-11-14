@@ -151,12 +151,105 @@ check(all(k.handle_left_type == 'AUTO_CLAMPED' for k in m.keyframe_points if k.s
 _curves[:] = []
 
 # ---------------------------------------------------------------------------
+print("region lattice")
+from maya_graph_editor import retime  # noqa: E402
+r = make_curve([(1, 0), (11, 2), (21, 4), (31, 1), (41, 0)], obj_name="RG")
+sel_only(r, [1, 2, 3])
+snap = common.CurveSnapshot.of(r)
+co, hl, hr = retime.transform_curve(snap, snap.selected, 11, 31, 11, 31,
+                                    vbox=(1, 4, 1, 7), mapping=(1.0, 0.0))
+check(np.allclose(co[1:4, 1], [3, 7, 1]), "top edge x2 about the bottom edge: %s" % co[1:4, 1])
+check(np.allclose(co[[0, 4], 1], [0, 0]), "unselected values untouched")
+check(np.allclose(hr[1:4, 1] - co[1:4, 1], (snap.hr[1:4, 1] - snap.co[1:4, 1]) * 2),
+      "handle heights scale with the values")
+deg = 180 / np.pi
+co, _, _ = retime.transform_curve(snap, snap.selected, 11, 31, 11, 31,
+                                  vbox=(1 * deg, 4 * deg, 1 * deg, 7 * deg), mapping=(deg, 0.0))
+check(np.allclose(co[1:4, 1], [3, 7, 1]), "same result for a curve shown in degrees")
+co, _, _ = retime.transform_curve(snap, snap.selected, 11, 31, 16, 36, ripple_after=True,
+                                  vbox=(1, 4, 2, 5), mapping=(1.0, 0.0))
+check(list(co[:, 0]) == [1, 16, 26, 36, 46] and np.allclose(co[1:4, 1], [3, 5, 2]),
+      "move +5 frames / +1 value, later key rippled: %s" % list(co[:, 0]))
+co, _, _ = retime.scale_values(snap, snap.selected, 50, 'ZERO')
+check(np.allclose(co[1:4, 1], [1, 2, 0.5]), "value 50% about zero")
+co, _, _ = retime.scale_values(snap, snap.selected, 200, 'FIRST')
+check(np.allclose(co[1:4, 1], [2, 6, 0]), "value 200% about the first key")
+co, _, _ = retime.scale_values(snap, snap.selected, 0, 'CENTER')
+check(np.allclose(co[1:4, 1], [2.5, 2.5, 2.5]), "value 0% about the centre flattens")
+check(retime.scaled_range(10, 20, 200, 'PLAYHEAD', 0) == (20, 40), "anchor at the playhead")
+
+ses = retime.Session(types.SimpleNamespace(as_pointer=lambda: 1))
+ses.values = True
+check(retime.hit_test(ses, 100, 50, 100, 300, 50, 200) == 'BL', "corner hit")
+check(retime.hit_test(ses, 200, 200, 100, 300, 50, 200) == 'T', "top edge hit")
+check(retime.hit_test(ses, 300, 500, 100, 300, 50, 200) == 'R', "time edge hit anywhere vertically")
+check(retime.hit_test(ses, 200, 120, 100, 300, 50, 200) == 'M', "inside -> move")
+check(retime.hit_test(ses, 500, 120, 100, 300, 50, 200) is None, "outside -> nothing")
+
+_curves[:] = [r]
+st.retime_scope = 'SELECTED'
+st.retime_ripple = False
+check(retime.retime_to(ctx, 11.0, 51.0) == (11.0, 51.0), "retime_to an exact range")
+check([round(k.co[0], 3) for k in r.keyframe_points] == [1, 11, 31, 41, 51],
+      "keys spread to 11..51 (no ripple: passes the later key, Blender re-sorts): %s" % [round(k.co[0], 3) for k in r.keyframe_points])
+
+# whole rig: hidden channels move too
+rigobj_curves = [make_curve([(1, 0), (10, 1), (20, 2), (30, 3)], obj_name="RIG", path="location", index=i)
+                 for i in range(3)]
+for fc in rigobj_curves:
+    sel_only(fc, [])
+sel_only(rigobj_curves[0], [1, 2])          # selection only on X
+_curves[:] = [rigobj_curves[0]]            # only X is shown in the editor
+rig_obj = bpy.data.objects["RIG"]
+rig_ctx = types.SimpleNamespace(area=ctx.area, scene=scene, selected_objects=[rig_obj],
+                                active_object=rig_obj, selected_pose_bones=None)
+st.retime_scope = 'RIG'
+st.retime_ripple = True
+res = retime.scale_selection(rig_ctx, 200, 'LEFT')
+xs = [[k.co[0] for k in fc.keyframe_points] for fc in rigobj_curves]
+check(res == (10, 30) and all(x == [1, 10, 30, 40] for x in xs),
+      "whole rig: hidden Y/Z channels retimed with X: %s" % xs)
+st.retime_scope = 'SELECTED'
+_curves[:] = []
+
+# ---------------------------------------------------------------------------
 print("theme colours")
 cols = common.ui_colors()
 check(set(cols) == {"bg", "text", "dim", "track", "accent", "active"} and all(len(c) == 4 for c in cols.values()),
       "theme colours resolved")
 fake.use_theme_colors = False
 check(common.ui_colors() == common._FIXED, "fixed colours when the preference is off")
+
+# ---------------------------------------------------------------------------
+print("translations / extension platform")
+from maya_graph_editor import i18n, updater  # noqa: E402
+tr = i18n.build()
+check(tr["ru_RU"][("*", "Snapshot")] == "Снимок" and tr["es"][("Operator", "Snapshot")] == "Captura",
+      "translation tables built for ru_RU and es")
+check(all(len(row) == len(i18n.LOCALES) for row in i18n.TABLE.values()), "every string has every language")
+prefs = bpy.context.preferences
+old_lang = (prefs.view.language, prefs.view.use_translate_interface)
+try:
+    prefs.view.language = 'ru_RU'
+    prefs.view.use_translate_interface = True
+    got = bpy.app.translations.pgettext_iface("Snapshot")
+    check(got == "Снимок", "Blender returns the Russian label (%s)" % got)
+except Exception as e:
+    print("  (language switch unavailable here: %s)" % e)
+finally:
+    prefs.view.language, prefs.view.use_translate_interface = old_lang
+check(updater.managed_by_blender() is None, "not managed by a remote repo in this install")
+updater.common.PKG = "bl_ext.blender_org.maya_graph_editor"
+fake_repo = types.SimpleNamespace(module="blender_org", use_remote_url=True, name="extensions.blender.org",
+                                  remote_url="https://extensions.blender.org/api/v1/extensions/")
+real_prefs = bpy.context.preferences
+import maya_graph_editor.updater as up_mod  # noqa: E402
+orig_ctx = up_mod.bpy
+up_mod.bpy = types.SimpleNamespace(context=types.SimpleNamespace(
+    preferences=types.SimpleNamespace(extensions=types.SimpleNamespace(repos=[fake_repo]))), app=bpy.app)
+check(updater.managed_by_blender() == "extensions.blender.org", "installed from extensions.blender.org -> updater off")
+up_mod.bpy = orig_ctx
+updater.common.PKG = "maya_graph_editor"
 
 addon.unregister()
 print()
