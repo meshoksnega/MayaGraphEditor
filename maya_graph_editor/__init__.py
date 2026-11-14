@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Maya Graph Editor Tools",
     "author": "meshoksnega",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (4, 2, 0),
     "location": "Graph Editor > Sidebar (N) > Maya",
     "description": ("Maya-style Graph Editor comforts: buffer/ghost curve, "

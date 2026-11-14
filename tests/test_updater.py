@@ -28,7 +28,10 @@ check(updater.parse_version("1.4") == (1, 4, 0), "1.4")
 check(updater.parse_version("2.0.1-beta") == (2, 0, 1), "2.0.1-beta")
 check(updater.parse_version("latest") is None, "non-version tag")
 check(updater.parse_version("v1.10.0") > updater.parse_version("v1.9.9"), "numeric, not text, comparison")
-check(updater.current_version() == (1, 0, 0), "installed version read from manifest")
+import re  # noqa: E402
+_manifest = open(os.path.join(HERE, "..", "maya_graph_editor", "blender_manifest.toml")).read()
+check(updater.current_version() == updater.parse_version(re.search(r'^version = "([^"]+)"', _manifest, re.M).group(1)),
+      "installed version read from manifest")
 
 print("asset selection")
 assets = [{"name": "maya_graph_editor-1.1.0-legacy.zip", "browser_download_url": "L"},
@@ -99,7 +102,9 @@ check(updater.get_state()["status"] == "ERROR" and "checksum" in updater.get_sta
 srv.shutdown()
 
 print("Blender's installer accepts the built extension zip")
-zip_path = os.path.join(HERE, "..", "dist", "maya_graph_editor-1.0.0.zip")
+import glob  # noqa: E402
+_zips = [z for z in glob.glob(os.path.join(HERE, "..", "dist", "maya_graph_editor-*.zip")) if "legacy" not in z]
+zip_path = sorted(_zips)[-1] if _zips else ""
 repos = [r.module for r in bpy.context.preferences.extensions.repos if not r.use_remote_url]
 print("  local repos:", repos)
 if os.path.exists(zip_path) and repos:
