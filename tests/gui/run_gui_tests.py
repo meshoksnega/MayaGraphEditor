@@ -307,6 +307,20 @@ def sequence():
         k.select_control_point = k.select_left_handle = k.select_right_handle = on
     view_all()
     yield 0.3
+    seen = []
+    real_modal = retime.MGE_OT_retime._modal
+
+    def spy(self, context, event):
+        if event.type in {'MOUSEMOVE', 'LEFTMOUSE'}:
+            r = region_of(graph_area(), 'WINDOW')
+            ses = retime._session
+            seen.append("%s/%s mouse=(%d,%d) region=(%d,%d %dx%d) edges_px=(%.1f,%.1f) area_ok=%s" % (
+                event.type, event.value, event.mouse_x, event.mouse_y, r.x, r.y, r.width, r.height,
+                retime._frame_to_px(r, 1.0, ses.cur_t0) if ses else -1,
+                retime._frame_to_px(r, 1.0, ses.cur_t1) if ses else -1,
+                context.area is not None and context.area.as_pointer() == graph_area().as_pointer()))
+        return real_modal(self, context, event)
+    retime.MGE_OT_retime._modal = spy
     with override():
         res = bpy.ops.mge.retime('INVOKE_DEFAULT')
     check(res == {'RUNNING_MODAL'}, "retime lattice opened")
@@ -319,7 +333,9 @@ def sequence():
     x_target = frame_to_px(51)
     ev('MOUSEMOVE', 'NOTHING', x_edge + 2, y)
     yield 0.1
-    check(retime._session.hover == 'R', "hovering the right edge")
+    check(retime._session.hover == 'R', "hovering the right edge (sent x=%.1f)" % (x_edge + 2))
+    for line in seen[-3:]:
+        print("    modal saw:", line, flush=True)
     ev('LEFTMOUSE', 'PRESS', x_edge + 2, y)
     yield 0.05
     for i in range(1, 11):
@@ -337,6 +353,7 @@ def sequence():
     yield 0.2
     check(not retime.is_active(), "Enter closed the lattice")
 
+    span_before = frames_now[3] - frames_now[1]
     with override():
         bpy.ops.mge.retime('INVOKE_DEFAULT')
     yield 0.1
@@ -346,7 +363,8 @@ def sequence():
     key('RET')
     yield 0.3
     frames_now = [k.co[0] for k in fc.keyframe_points]
-    check(abs(frames_now[3] - frames_now[1] - 20) < 0.5, "typing 50 + Enter halved the range: %s" % frames_now)
+    check(abs((frames_now[3] - frames_now[1]) - span_before / 2) < 0.5,
+          "typing 50 + Enter halved the range: %s" % frames_now)
 
     # ---------------------------------------------------------- panels / prefs drawn
     print("panels", flush=True)

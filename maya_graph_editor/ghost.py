@@ -310,11 +310,20 @@ def register_tool():
                          (bpy.app.handlers.save_pre, _on_save_pre)):
         if fn not in handlers:
             handlers.append(fn)
+    # Ghosts saved in the file that is already open.  bpy.data is restricted
+    # while add-ons register, so read it a moment later.
+    bpy.app.timers.register(_load_deferred, first_interval=0.0)
+    common.redraw_graph_editors()
+
+
+def _load_deferred():
     try:
-        load_from_actions()  # ghosts saved in the file that is already open
+        if not _buffers:
+            load_from_actions()
     except Exception:
         common.log_exception("loading ghosts")
     common.redraw_graph_editors()
+    return None
 
 
 def unregister_tool():
