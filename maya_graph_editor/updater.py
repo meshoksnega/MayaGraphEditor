@@ -56,6 +56,12 @@ def parse_version(text):
     return tuple(int(g or 0) for g in m.groups())
 
 
+def asset_version(name):
+    """'maya_graph_editor-1.1.0-legacy.zip' -> (1, 1, 0); None if no version."""
+    m = re.search(r"-v?(\d+)\.(\d+)(?:\.(\d+))?(?:-[A-Za-z]+)?\.zip$", name)
+    return tuple(int(g or 0) for g in m.groups()) if m else None
+
+
 def version_str(v):
     return ".".join(str(x) for x in v) if v else "?"
 
@@ -94,10 +100,15 @@ def pick_asset(assets, kind):
 
 def parse_release(data, kind):
     """GitHub 'latest release' JSON -> info dict, or raise ValueError."""
-    version = parse_version(data.get("tag_name", ""))
-    if version is None:
-        raise ValueError("Release tag '%s' is not a version number" % data.get("tag_name"))
     asset = pick_asset(data.get("assets", []), kind)
+    # The zip's own name (maya_graph_editor-1.1.0.zip) is what gets installed,
+    # so it wins over the tag, which may follow a different numbering.
+    version = asset_version(asset.get("name", "")) if asset else None
+    if version is None:
+        version = parse_version(data.get("tag_name", ""))
+    if version is None:
+        raise ValueError("Release '%s' has no version number in its tag or zip name"
+                         % data.get("tag_name"))
     return {
         "version": version,
         "tag": data.get("tag_name", ""),
@@ -162,7 +173,7 @@ def _check_worker(installed, kind):
     if info["version"] > installed:
         if not info["asset_url"]:
             _set(status="ERROR", latest=info,
-                 message="Release %s has no installable zip attached" % info["tag"])
+                 message="Release %s has no installable zip attached" % (info["tag"] or "?"))
         else:
             _set(status="AVAILABLE", latest=info,
                  message="Version %s is available" % version_str(info["version"]))
@@ -192,7 +203,7 @@ def _download_worker(info):
         digest = info.get("digest") or ""
         if digest.startswith("sha256:") and digest[7:].lower() != h.hexdigest():
             raise RuntimeError("Downloaded file failed its checksum, not installed")
-        _set(status="DOWNLOADING", message="Installing %s..." % info["tag"], zip_path=path)
+        _set(status="DOWNLOADING", message="Installing %s..." % version_str(info.get("version")), zip_path=path)
     except Exception as e:
         _set(status="ERROR", message="Download failed: %s" % e)
 
@@ -255,7 +266,7 @@ def start_install():
     if not online_allowed():
         _set(status="ERROR", message="Online access is off (Preferences > System > Network)")
         return
-    _set(status="DOWNLOADING", message="Downloading %s..." % st["latest"]["tag"], zip_path=None)
+    _set(status="DOWNLOADING", message="Downloading %s..." % version_str(st["latest"]["version"]), zip_path=None)
     threading.Thread(target=_download_worker, args=(st["latest"],), daemon=True).start()
     _ensure_timer()
 
@@ -268,7 +279,7 @@ def _window_override():
 
 def _install(path, info):
     kind, repo = install_kind()
-    tag = info["tag"] if info else "?"
+    tag = version_str(info.get("version")) if info else "?"
     try:
         # Mark success first: an Extension install reloads this very module,
         # so the message is also left in a marker file for the new code.
