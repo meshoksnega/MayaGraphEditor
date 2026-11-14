@@ -44,6 +44,13 @@ check(updater.pick_asset([{"name": "a.txt"}], "EXTENSION") is None, "no zip -> N
 info = updater.parse_release({"tag_name": "v1.1.0", "html_url": "U", "assets": assets}, "EXTENSION")
 check(info["version"] == (1, 1, 0) and info["asset_url"] == "E" and info["digest"] == "sha256:ab",
       "release JSON parsed")
+check(updater.asset_version("maya_graph_editor-1.1.0.zip") == (1, 1, 0), "version from zip name")
+check(updater.asset_version("maya_graph_editor-1.1.0-legacy.zip") == (1, 1, 0), "version from legacy zip name")
+check(updater.asset_version("maya_graph_editor.zip") is None, "zip without version")
+odd_tag = updater.parse_release({"tag_name": "0.0.3", "assets": assets}, "EXTENSION")
+check(odd_tag["version"] == (1, 1, 0), "zip version wins over a differently numbered tag (0.0.3)")
+no_ver = updater.parse_release({"tag_name": "v2.0", "assets": [{"name": "addon.zip"}]}, "EXTENSION")
+check(no_ver["version"] == (2, 0, 0), "falls back to the tag when the zip has no version")
 check(updater.install_kind() == ("LEGACY", None), "plain package name -> legacy install")
 updater.common.PKG = "bl_ext.user_default.maya_graph_editor"
 check(updater.install_kind() == ("EXTENSION", "user_default"), "bl_ext.<repo>.<id> -> extension in that repo")
