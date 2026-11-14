@@ -27,11 +27,11 @@ operators, panel, draw handler or shortcuts.
 Requires **Blender 4.2 or newer** (tested in CI on 4.2 LTS and 5.1).
 
 ```bash
-python3 build.py     # writes dist/maya_graph_editor-1.2.0.zip (+ a -legacy.zip)
+python3 build.py     # writes dist/maya_graph_editor-1.2.1.zip (+ a -legacy.zip)
 ```
 
 * **Blender 4.2+:** Preferences → Get Extensions → ⌄ menu → *Install from Disk…* → pick
-  `maya_graph_editor-1.2.0.zip`.
+  `maya_graph_editor-1.2.1.zip`.
 * Legacy add-on install (Preferences → Add-ons → Install from Disk) → use the `-legacy.zip`.
 
 ## Shortcuts (Graph Editor)
@@ -160,8 +160,8 @@ a Noise modifier isn't baked in twice), **simplify** to the tolerance, then set 
 **Preferences → Add-ons (or Extensions) → Maya Graph Editor Tools → Updates**:
 
 * **Check for Updates** asks GitHub for the latest release of this repository and compares its version with
-  the installed one. The version comes from the zip's name (`maya_graph_editor-1.2.0.zip`), or from the tag
-  (`v1.2.0`) if the zip name has none.
+  the installed one. The version comes from the zip's name (`maya_graph_editor-1.2.1.zip`), or from the tag
+  (`v1.2.1`) if the zip name has none.
 * **Install x.y.z** downloads the right zip (Extension or legacy), checks its SHA-256 when GitHub provides one,
   and installs it with Blender's own installer. **Release Notes** opens the release page.
 * **Check for updates on startup** (off by default) checks at most once a day.
@@ -174,7 +174,7 @@ add-on comes from a remote extensions repository the Updates section just says s
 ### Publishing a release (maintainer)
 1. Bump the version in **both** `maya_graph_editor/blender_manifest.toml` and `bl_info` in `__init__.py`
    (`build.py` refuses to build if they differ).
-2. Commit, then tag and push: `git tag v1.2.0 && git push origin v1.2.0`. Use the add-on's version as the tag,
+2. Commit, then tag and push: `git tag v1.2.1 && git push origin v1.2.1`. Use the add-on's version as the tag,
    because add-on versions up to 1.1.0 read the version from the tag only.
 3. The **Release** GitHub Action builds both zips and publishes the release. That's what the updater installs.
 

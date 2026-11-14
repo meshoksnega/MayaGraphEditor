@@ -106,6 +106,19 @@ updater._set(zip_path=None)
 updater._download_worker(dict(good, digest="sha256:" + "0" * 64))
 check(updater.get_state()["status"] == "ERROR" and "checksum" in updater.get_state()["message"],
       "bad checksum rejected")
+updater._download_worker(dict(good, asset_url=url.replace("a.zip", "gone.zip")))
+check(updater.get_state()["status"] == "ERROR" and "Check for Updates again" in updater.get_state()["message"],
+      "dead link -> clear 'check again' message instead of a raw 404")
+# Install re-reads the release first, so a stale link from an earlier check is replaced
+stale = dict(good, asset_url=url.replace("a.zip", "gone.zip"))
+real_fetch = updater.fetch_latest
+updater.fetch_latest = lambda kind: dict(good)
+updater._set(zip_path=None, status="IDLE")
+updater._download_worker(stale, "EXTENSION")
+st = updater.get_state()
+check(st["zip_path"] and open(st["zip_path"], "rb").read() == payload,
+      "stale link from an earlier check is refreshed before downloading")
+updater.fetch_latest = real_fetch
 srv.shutdown()
 
 print("Blender's installer accepts the built extension zip")
