@@ -34,6 +34,11 @@ and every tool can be switched off on its own.
 - **Mocap cleanup.** Bake, simplify and set tangents in one click.
 - **Curves.** One-click Pre/Post Infinity (Constant, Linear, Cycle, Cycle with Offset, Oscillate) and Euler filter.
 - **Key stats.** Frame and value fields for the whole selection, absolute or relative, in degrees for rotation.
+- **Blocking.** Stepped Preview that gives your splines back, Round to Whole Frames, Seamless Loop.
+- **Stagger and Overlap.** Offset bones in time, or generate follow-through down a chain.
+- **Noise and Settle.** Smooth noise, or a decaying wobble after a move.
+- **Shape library and paste modes.** Reuse a good ease or overshoot; paste with Merge, Replace, Insert or Fit.
+- **Channel sets, Isolate, Auto Frame** and selection helpers.
 
 Every interactive tool previews on the real curves: **Enter** keeps the result as one undo step,
 **Esc** puts everything back exactly.
@@ -48,7 +53,7 @@ Every interactive tool previews on the real curves: **Enter** keeps the result a
 ### Good to know
 
 - Works in Blender 4.2 LTS and newer; tested automatically in 4.2 and 5.1, including the on-screen tools.
-- Interface available in English, Russian and Spanish.
+- Interface available in English, Russian, Spanish, French, German, Japanese, Chinese and Portuguese.
 - Source, documentation and issue tracker: https://github.com/meshoksnega/MayaGraphEditor
 ```
 
@@ -64,7 +69,8 @@ https://github.com/meshoksnega/MayaGraphEditor
 
 ## Before submitting
 
-The add-on includes a GitHub updater and declares the `network` permission for it. It already switches itself
-off when installed from extensions.blender.org, but the platform's rules don't allow add-ons to update
-themselves, so a reviewer may still ask for it to be removed. The safe route is to submit a build without
-`updater.py` and without the `[permissions] network` line.
+Submit the store build, not the GitHub build:
+
+    python build.py --store      # writes dist/store/maya_graph_editor-<version>-extensions.zip
+
+It has no GitHub updater and no network permission, as the platform requires (it updates add-ons itself).

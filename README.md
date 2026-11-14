@@ -17,6 +17,13 @@ sidebar (**N → Maya** tab). No new windows, no node graph, nothing that touche
 | **Time Warp** | Ease the timing inside a range (slow in / slow out) without touching values. |
 | **Mocap Cleanup** | Bake, simplify and set tangents in one click. |
 | **Curves** | One-click Pre/Post Infinity (Constant, Linear, Cycle, Cycle with Offset, Oscillate) and Euler filter. |
+| **Blocking** | Stepped Preview for blocking review, Round to Whole Frames, Seamless Loop, Equalize Handles. |
+| **Stagger / Overlap** | Offset bones or curves in time for overlap, or generate follow-through down a chain. |
+| **Key Sliders** | Blender's own slider tools (Breakdown, Ease, Push/Pull, Shear and more), one click away. |
+| **Channels & Selection** | Saved channel sets, Isolate, Auto Frame, selection helpers. |
+| **Noise / Settle** | Add smooth noise, or a decaying wobble after a move. |
+| **Shapes & Paste** | A library of curve shapes, and copy/paste with Merge, Replace, Insert and Fit. |
+| **Stacked Overview** | Experimental read-only view with one lane per curve. |
 
 Each tool can be switched off independently (**Preferences → Add-ons → Maya Graph Editor Tools**, or the
 collapsed *Enabled Tools* panel at the bottom of the Maya tab). A disabled tool is fully unregistered: no
@@ -27,11 +34,11 @@ operators, panel, draw handler or shortcuts.
 Requires **Blender 4.2 or newer** (tested in CI on 4.2 LTS and 5.1).
 
 ```bash
-python3 build.py     # writes dist/maya_graph_editor-1.2.1.zip (+ a -legacy.zip)
+python3 build.py     # writes dist/maya_graph_editor-1.3.0.zip (+ a -legacy.zip)
 ```
 
 * **Blender 4.2+:** Preferences → Get Extensions → ⌄ menu → *Install from Disk…* → pick
-  `maya_graph_editor-1.2.1.zip`.
+  `maya_graph_editor-1.3.0.zip`.
 * Legacy add-on install (Preferences → Add-ons → Install from Disk) → use the `-legacy.zip`.
 
 ## Shortcuts (Graph Editor)
@@ -82,6 +89,10 @@ Blender's default Graph Editor keymap.
 * **Clear** empties the active slot, **Clear All** every slot.
 * **Range:** the curve's key range, or the scene/preview frame range (shows cycles and extrapolation).
 * **Solid** or **Dashed** lines, adjustable width.
+* **Swap Range** swaps only the time range of the selected keys with the ghost.
+* **Ghost from Action**: pick another action (a reference, mocap, an earlier take) and its matching channels
+  appear as ghosts.
+* **Colour Palette** offers a colour-blind-safe set (yellow, purple, white).
 * **Save Ghosts in File** (on by default) keeps them in the .blend, stored on each action when you save.
 
 ### Simplify (live preview)
@@ -155,36 +166,90 @@ a Noise modifier isn't baked in twice), **simplify** to the tolerance, then set 
   choosing Constant or Linear for one end also changes a non-cycling other end (the add-on tells you).
 * **Euler Filter** runs Blender's discontinuity filter on the selected rotation curves.
 
+### Blocking
+* **Stepped Preview** shows the selected objects' animation stepped, for blocking review. It sets every key
+  to Constant and remembers what each key had (on the action, so it survives saving). Click again and the
+  splines are back. Keys added while it is on get Blender's default interpolation afterwards.
+* **Round to Whole Frames** moves the selected keys to the nearest frame. **Auto** does it after Retime / Region,
+  Time Warp and Stagger, so stretching never leaves keys between frames.
+* **Seamless Loop** makes the last key match the first and turns on Cycle, so a cycle loops without a pop.
+* **Equalize Handles** resets handle lengths to a third of the neighbouring segment, keeping their angle
+  (Maya's non-weighted tangents).
+
+### Stagger / Overlap
+Choose how curves are grouped (**Per Bone / Object** or **Each Curve**) and ordered (**Channel List Order** or
+**Bone Hierarchy**, root to tip; the arrow reverses it).
+* **Stagger**: drag to shift each group's selected keys a little later than the group before it.
+  *Gain per Step* also scales each step's values, e.g. 85% for motion that dies down along a tail.
+* **Overlap**: the first group is the leader. Every later group gets a delayed, scaled copy of the leader's
+  matching channels, starting from its own first key's value. It replaces the followers' keys in that range.
+
+### Key Sliders
+Blender's built-in interactive sliders (Breakdown, Blend to Neighbor, Ease, Push / Pull, Shear, Match Slope,
+Gaussian and Butterworth Smooth, and others), normally three menus deep. They work on the selected keys of
+**selected channels**, and are Blender's own tools: click to apply, right-click to cancel.
+
+### Channels & Selection
+* **Channel Sets**: select channels, press **+**, name the set. Clicking a set shows only those channels on the
+  selected objects. Sets store property names, so one set works on every character with the same rig.
+* **Isolate** shows only the selected curves; click again to restore. **Show All** unhides everything.
+* **Auto Frame Selection** frames the selected keys whenever the selection changes.
+* **Select Keys**: at the playhead, in the preview range, every Nth, or invert per curve.
+
+### Noise / Settle
+* **Noise**: drag to add smooth random variation to the selected keys. *Scale* is frames per wiggle; the same
+  *Seed* always gives the same result.
+* **Settle**: select the key where a move ends and drag: a decaying wobble is added after it, sized by how fast
+  the curve was moving. *Wobble* is frames per swing, *Length* how long until it rests.
+
+### Shapes & Paste
+* **Shape Library**: select the keys of a move you like and **+** to save its shape. **Apply Shape** stretches a
+  shape between the first and last selected key of every curve. Four shapes are built in (Ease In-Out, Overshoot,
+  Anticipation, Bounce Settle); yours are stored in Blender's user folder and available in every file.
+* **Copy Keys**, then paste at the playhead: **Merge** keeps existing keys, **Replace** clears the pasted range
+  first, **Insert** pushes later keys back, **Fit** stretches the copy over the selected keys' range.
+  *Relative Values* starts the pasted keys from the curve's current value.
+
+### Stacked Overview (experimental)
+One lane per shown curve, scaled to fit, keys marked, on the editor's own time axis. It is read-only: Blender
+doesn't let add-ons change how the Graph Editor draws or edits curves (see `docs/research_stacked_view.md`),
+so turn it off to edit.
+
 ## Updating from GitHub
 
 **Preferences → Add-ons (or Extensions) → Maya Graph Editor Tools → Updates**:
 
 * **Check for Updates** asks GitHub for the latest release of this repository and compares its version with
-  the installed one. The version comes from the zip's name (`maya_graph_editor-1.2.1.zip`), or from the tag
-  (`v1.2.1`) if the zip name has none.
+  the installed one. The version comes from the zip's name (`maya_graph_editor-1.3.0.zip`), or from the tag
+  (`v1.3.0`) if the zip name has none.
 * **Install x.y.z** downloads the right zip (Extension or legacy), checks its SHA-256 when GitHub provides one,
   and installs it with Blender's own installer. **Release Notes** opens the release page.
 * **Check for updates on startup** (off by default) checks at most once a day.
 * Needs Blender's **Allow Online Access** (Preferences → System → Network). Nothing is downloaded otherwise.
 
-### Installed from extensions.blender.org?
-Blender's extension platform updates add-ons itself and doesn't allow them to update themselves, so when this
-add-on comes from a remote extensions repository the Updates section just says so and never contacts GitHub.
+### extensions.blender.org
+Blender's extension platform updates add-ons itself and doesn't allow them to update themselves.
+`python build.py --store` writes `dist/store/maya_graph_editor-<version>-extensions.zip`: the same add-on with
+no updater and no network permission. That is the file to submit there. (A normal build installed from a
+remote repository also switches its updater off.) Listing text is in `docs/extensions_listing.md`.
 
 ### Publishing a release (maintainer)
 1. Bump the version in **both** `maya_graph_editor/blender_manifest.toml` and `bl_info` in `__init__.py`
    (`build.py` refuses to build if they differ).
-2. Commit, then tag and push: `git tag v1.2.1 && git push origin v1.2.1`. Use the add-on's version as the tag,
+2. Commit, then tag and push: `git tag v1.3.0 && git push origin v1.3.0`. Use the add-on's version as the tag,
    because add-on versions up to 1.1.0 read the version from the tag only.
 3. The **Release** GitHub Action builds both zips and publishes the release. That's what the updater installs.
 
-## Language and colours
+## Language, colours and settings
 
 ![The Maya tab in Russian](docs/media/russian.jpg)
 
-* The interface is translated into **Russian** and **Spanish** (Preferences → Interface → Translation). Other
-  languages can be added in `maya_graph_editor/i18n.py`. Numbers built at runtime (like "16 keys") stay in English.
-* On-screen bars and the lattice use your **theme's colours** (preference *Use theme colours*).
+* The interface is translated into **Russian, Spanish, French, German, Japanese, Simplified Chinese and
+  Brazilian Portuguese** (Preferences → Interface → Translation). The table is in
+  `maya_graph_editor/i18n_data.py`; corrections from native speakers are welcome.
+* On-screen bars and the lattice use your **theme's colours**, and **On-Screen Text Size** makes them larger.
+* **Export / Import Settings** moves tool options, enabled tools, shortcuts and channel sets between machines.
+* After an update a **What's New** summary appears once (can be turned off).
 
 ## Tests
 
@@ -195,23 +260,25 @@ Every push runs **Tests** on GitHub Actions:
   python tests/test_addon.py            # registration/toggles, snapshots, tangents, ghost, retime, simplify
   python tests/test_v11.py              # v1.1 features: sides, break/unify, infinity, stats, slots, saving
   python tests/test_v12.py              # v1.2: tween, smooth, warp, cleanup, region, rig scope, translations
+  python tests/test_v13.py              # v1.3: blocking, stagger/overlap, channels, generators, shapes, paste
   python tests/test_simplify_model.py   # simplify error model vs. Blender's real curve evaluation
   python tests/test_updater.py          # updater: versions, asset choice, checksum, Blender installer
   ```
 * **GUI** in real Blender **4.2 LTS and 5.1** under Xvfb (`tests/gui/run_gui_tests.py`), driven by simulated
-  mouse and keyboard events. It covers ghost drawing, simplify, retime and region drags (edges, value edge, move),
-  tween, smooth, time warp, cleanup and the Russian UI. It checks the overlay mapping against Blender's view
-  (within 1 px) and shortcut conflicts, and fails on any Python traceback. It also runs Blender's own
-  extension validator, and saves the screenshots and GIFs used in this README.
+  mouse and keyboard events. It exercises the interactive tools, checks shortcut conflicts, and fails on any
+  Python traceback. It also asks Blender where it draws keys and compares that with the add-on's own mapping,
+  for plain curves, rotation in degrees, Normalize, the seconds display and NLA strips in tweak mode.
+  It runs Blender's extension validator and records the screenshots and GIFs used here.
+* A weekly run against **Blender's daily build** gives early warning of API changes (allowed to fail).
 
 ## Limitations
 
-* The ghost compensates for degree display of rotation channels and for *Normalize* by re-implementing what
-  Blender does; unusual setups could be slightly off. NLA time mapping and *seconds* display are not verified.
-* The region lattice's value box uses the display mapping from when it opened. With *Normalize* on, Blender
-  re-normalises while you drag, so the box can drift from the curve until you reopen it.
 * Ghosts are matched to curves by (action, data path, array index); renaming an action loses its ghosts.
+* The region lattice and Stacked Overview assume the same time mapping for all curves; with several NLA
+  strips in tweak mode at different offsets only ghosts are mapped per curve.
+* Stacked Overview is read-only, and Blender's own value-axis numbers still show on top of it.
 * Only Tangents work in the Drivers editor.
+* The translations have not been reviewed by native speakers.
 
 ## Layout
 
@@ -219,10 +286,12 @@ Every push runs **Tests** on GitHub Actions:
 maya_graph_editor/
   __init__.py  core.py          registration, preferences, per-tool toggles, settings
   common.py                     curve snapshots, display mapping, drawing, theme colours
-  ghost.py tangents.py simplify.py retime.py curves.py stats.py   tools
-  slider.py                     shared live-preview slider (tween.py, smooth.py, warp.py)
-  cleanup.py  keymaps.py  i18n.py  updater.py
+  slider.py                     shared live-preview slider (tween, smooth, warp, stagger, generate)
+  ghost.py tangents.py simplify.py retime.py curves.py stats.py cleanup.py
+  blocking.py stagger.py hub.py channels.py generate.py shapes.py stacked.py
+  keymaps.py  i18n.py  i18n_data.py  presets.py  whatsnew.py  updater.py
   simplify_core.py              removal-order maths (numpy only)
   blender_manifest.toml
-tests/  tests/gui/  docs/media/  build.py  .github/workflows/
+store/updater.py                stand-in used by `python build.py --store` (extensions.blender.org build)
+tests/  tests/gui/  docs/  build.py  .github/workflows/
 ```

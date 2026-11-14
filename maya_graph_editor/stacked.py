@@ -18,7 +18,7 @@ _handle = None
 MAX_LANES = 40
 
 
-def lane_layout(count, height, top_margin=34, bottom_margin=30):
+def lane_layout(count, height, top_margin=58, bottom_margin=30):
     """[(y_bottom, y_top), ...] for `count` lanes, first lane at the top."""
     count = min(count, MAX_LANES)
     if count <= 0:
@@ -67,7 +67,7 @@ def _draw():
             len(curves), "" if len(curves) == 1 else "s")
         if len(curves) > MAX_LANES:
             title += "   showing the first %d" % MAX_LANES
-        common.draw_text(12, h - 24, title, 14, col["text"])
+        common.draw_text(52, h - 50, title, 14, col["text"])  # below Blender's time ruler
         common.draw_text(12, 10, "same time axis as the editor · pan / zoom as usual · "
                          "turn Stacked Overview off to edit", 11, col["dim"])
         if not curves:
@@ -94,7 +94,8 @@ def _draw():
                     c = col["active"] if k.select_control_point else col["text"]
                     common.draw_rect(kx - 2, ky - 2, kx + 2, ky + 2, c)
             if y_hi - y_lo >= 12:
-                common.draw_text(8, y_hi - 13 * common.hud_scale(), channel_label(fc), 11, col["dim"])
+                # right of Blender's value-axis numbers, which are drawn on top
+                common.draw_text(52, y_hi - 13 * common.hud_scale(), channel_label(fc), 11, col["dim"])
     except Exception:
         common.log_exception("stacked overview")
 

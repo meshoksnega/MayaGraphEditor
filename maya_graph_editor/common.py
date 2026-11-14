@@ -452,9 +452,10 @@ def nla_mapping(fc):
 
 
 def time_scale(space, scene):
-    """Graph Editor x coordinate = frame * time_scale (seconds display)."""
-    if getattr(space, "show_seconds", False):
-        return scene.render.fps_base / scene.render.fps
+    """Graph Editor x coordinate = frame * time_scale.
+
+    Always 1: with "Show Seconds" on, Blender only changes the ruler labels;
+    keys stay at their frame positions (verified by the GUI tests)."""
     return 1.0
 
 

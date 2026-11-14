@@ -697,6 +697,7 @@ def sequence():
     check(len(fc.keyframe_points) == 3, "Esc removes them again")
 
     reset_curve([(1, 0), (11, 2), (21, 8), (31, 10)], {1, 2})
+    fc.select = True   # Blender's sliders work on selected channels
     yield 0.3
     before_vals = [k.co[1] for k in fc.keyframe_points]
     ev('MOUSEMOVE', 'NOTHING', cx, cy)
