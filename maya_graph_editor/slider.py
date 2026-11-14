@@ -36,6 +36,8 @@ class SliderTool:
     snap_step = 10.0
     hint = ""
 
+    write = None       # optional: write(job, fc, value) instead of compute()
+
     def prepare(self, context):
         raise NotImplementedError
 
@@ -80,8 +82,11 @@ def apply_value(context, value):
         fc = fmap.get(job.key)
         if fc is None:
             continue
-        co, hl, hr = ses.tool.compute(job, value)
-        job.snap.write(fc, co=co, hl=hl, hr=hr)
+        if ses.tool.write is not None:
+            ses.tool.write(job, fc, value)  # tools that add / remove keys
+        else:
+            co, hl, hr = ses.tool.compute(job, value)
+            job.snap.write(fc, co=co, hl=hl, hr=hr)
     common.redraw_graph_editors()
 
 
@@ -99,12 +104,15 @@ def finish(context, apply):
     ses = _session
     if ses is None:
         return
+    fmap = common.fcurve_map(context)
     if not apply:
-        fmap = common.fcurve_map(context)
         for job in ses.jobs:
             fc = fmap.get(job.key)
             if fc is not None:
                 job.snap.write(fc)
+    elif ses.tool.id in ("warp", "stagger", "overlap"):
+        from . import blocking
+        blocking.auto_round(context, [fmap[j.key] for j in ses.jobs if j.key in fmap])
     if ses.handle is not None:
         bpy.types.SpaceGraphEditor.draw_handler_remove(ses.handle, 'WINDOW')
     try:

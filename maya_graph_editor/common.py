@@ -15,7 +15,8 @@ import bpy
 PKG = __package__
 
 TOOL_IDS = ("ghost", "tangents", "simplify", "retime", "curves", "stats",
-            "tween", "smooth", "warp", "cleanup")
+            "tween", "smooth", "warp", "cleanup",
+            "blocking", "stagger", "hub", "channels", "generate", "shapes", "stacked")
 
 
 # --------------------------------------------------------------------------
@@ -208,6 +209,81 @@ class CurveSnapshot:
         c.extrapolation = self.extrapolation
         return c
 
+    @classmethod
+    def from_arrays(cls, like, co, hl, hr, indices):
+        """New snapshot with given positions; other attributes copied from
+        `like` at `indices` (one source index per new key)."""
+        c = cls()
+        idx = [int(i) for i in indices]
+        c.n = len(idx)
+        c.co, c.hl, c.hr = (np.array(a, dtype=np.float64).reshape(c.n, 2) for a in (co, hl, hr))
+        c.enums = {k: [v[i] for i in idx] for k, v in like.enums.items()}
+        c.floats = {k: [v[i] for i in idx] for k, v in like.floats.items()}
+        c.bools = {k: [v[i] for i in idx] for k, v in like.bools.items()}
+        c.extrapolation = like.extrapolation
+        return c
+
+    @classmethod
+    def build(cls, xs, ys, handle='AUTO_CLAMPED', interpolation='BEZIER', selected=True,
+              extrapolation='CONSTANT'):
+        """Snapshot of brand-new keys (auto handles get their shape on write)."""
+        c = cls()
+        c.n = len(xs)
+        c.co = np.stack([np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)], axis=1) \
+            if c.n else np.zeros((0, 2))
+        c.hl, c.hr = c.co.copy(), c.co.copy()
+        if c.n:
+            c.hl[:, 0] -= 1.0
+            c.hr[:, 0] += 1.0
+        c.enums = {"handle_left_type": [handle] * c.n, "handle_right_type": [handle] * c.n,
+                   "interpolation": [interpolation] * c.n, "type": ['KEYFRAME'] * c.n,
+                   "easing": ['AUTO'] * c.n}
+        c.floats = {"back": [1.70158] * c.n, "amplitude": [0.8] * c.n, "period": [4.1] * c.n}
+        c.bools = {a: [bool(selected)] * c.n for a in _BOOL_ATTRS}
+        c.extrapolation = extrapolation
+        return c
+
+    def subset(self, mask):
+        idx = np.flatnonzero(np.asarray(mask, dtype=bool))
+        return CurveSnapshot.from_arrays(self, self.co[idx], self.hl[idx], self.hr[idx], idx)
+
+    @staticmethod
+    def concat(parts):
+        """Join snapshots into one, sorted by time."""
+        parts = [p for p in parts if p.n]
+        c = CurveSnapshot()
+        if not parts:
+            c.n = 0
+            c.co = c.hl = c.hr = np.zeros((0, 2))
+            c.enums = {a: [] for a in _ENUM_ATTRS}
+            c.floats = {a: [] for a in _FLOAT_ATTRS}
+            c.bools = {a: [] for a in _BOOL_ATTRS}
+            c.extrapolation = 'CONSTANT'
+            return c
+        co = np.concatenate([p.co for p in parts])
+        order = np.argsort(co[:, 0], kind="stable")
+        c.n = len(order)
+        c.co = co[order]
+        c.hl = np.concatenate([p.hl for p in parts])[order]
+        c.hr = np.concatenate([p.hr for p in parts])[order]
+        for name, attrs in (("enums", _ENUM_ATTRS), ("floats", _FLOAT_ATTRS), ("bools", _BOOL_ATTRS)):
+            merged = {}
+            for a in attrs:
+                flat = [v for p in parts for v in getattr(p, name)[a]]
+                merged[a] = [flat[i] for i in order]
+            setattr(c, name, merged)
+        c.extrapolation = parts[0].extrapolation
+        return c
+
+    def splice(self, other, x0, x1):
+        """This curve with its keys in [x0, x1] replaced by `other`'s keys in that range."""
+        eps = 1e-6
+        keep = (self.co[:, 0] < x0 - eps) | (self.co[:, 0] > x1 + eps)
+        take = (other.co[:, 0] >= x0 - eps) & (other.co[:, 0] <= x1 + eps)
+        out = CurveSnapshot.concat([self.subset(keep), other.subset(take)])
+        out.extrapolation = self.extrapolation
+        return out
+
     @property
     def selected(self):
         return np.array(self.bools["select_control_point"], dtype=bool)
@@ -295,6 +371,7 @@ def curve_is_angle(fc):
 
 def clear_caches():
     _angle_cache.clear()
+    _nla_owner_cache.clear()
 
 
 def normalization_params(fc):
@@ -328,6 +405,50 @@ def display_mapping(fc, space, scene):
             scene.unit_settings.system_rotation == 'DEGREES'):
         return 180.0 / np.pi, 0.0
     return 1.0, 0.0
+
+
+_nla_owner_cache = {}
+
+
+def nla_mapping(fc):
+    """(scale, offset): scene_frame = key_frame * scale + offset.
+
+    Identity unless the curve's action is being tweaked inside an NLA strip,
+    where the Graph Editor shows keys at their strip-mapped time."""
+    action = fc.id_data
+    if action is None:
+        return 1.0, 0.0
+    name = action.name_full
+    owner_name = _nla_owner_cache.get(name)
+    owner = None
+    if owner_name is not None:
+        coll = getattr(bpy.data, owner_name[0], None)
+        owner = coll.get(owner_name[1]) if coll is not None else None
+        ad = getattr(owner, "animation_data", None) if owner is not None else None
+        if ad is None or ad.action != action:
+            owner = None
+    if owner is None:
+        for cname in _ID_COLLECTIONS:
+            coll = getattr(bpy.data, cname, None)
+            for idb in (coll or ()):
+                ad = getattr(idb, "animation_data", None)
+                if ad is not None and ad.action == action:
+                    owner = idb
+                    _nla_owner_cache[name] = (cname, idb.name)
+                    break
+            if owner is not None:
+                break
+    if owner is None:
+        return 1.0, 0.0
+    ad = owner.animation_data
+    if not getattr(ad, "use_tweak_mode", False):
+        return 1.0, 0.0
+    try:
+        a = ad.nla_tweak_strip_time_to_scene(0.0)
+        b = ad.nla_tweak_strip_time_to_scene(1.0)
+    except Exception:
+        return 1.0, 0.0
+    return b - a, a
 
 
 def time_scale(space, scene):
@@ -469,7 +590,13 @@ def draw_rect(x0, y0, x1, y1, color):
     _set_blend('NONE')
 
 
+def hud_scale():
+    prefs = get_prefs()
+    return float(getattr(prefs, "hud_scale", 1.0) or 1.0) if prefs is not None else 1.0
+
+
 def draw_text(x, y, text, size=13, color=(1, 1, 1, 1)):
+    size = size * hud_scale()
     try:
         blf.size(0, size)
     except TypeError:  # Blender < 4.0 signature
@@ -524,12 +651,13 @@ def with_alpha(color, alpha):
 def draw_slider_hud(region, title, frac, hint, marks=()):
     """Bar at the bottom of the Graph Editor: title, track with knob, hint."""
     col = ui_colors()
+    k = hud_scale()
     w = region.width
     x0, x1 = 24, max(w - 24, 200)
-    draw_rect(x0 - 10, 14, x1 + 10, 78, col["bg"])
-    draw_text(x0, 58, title, 14, col["text"])
-    draw_text(x0, 22, hint, 11, col["dim"])
-    track_y = 44
+    draw_rect(x0 - 10, 14, x1 + 10, 14 + 64 * k, col["bg"])
+    draw_text(x0, 14 + 44 * k, title, 14, col["text"])
+    draw_text(x0, 14 + 8 * k, hint, 11, col["dim"])
+    track_y = 14 + 30 * k
     draw_rect(x0, track_y, x1, track_y + 4, col["track"])
     f = min(max(frac, 0.0), 1.0)
     for m in marks:
@@ -541,6 +669,7 @@ def draw_slider_hud(region, title, frac, hint, marks=()):
 
 
 def text_width(text, size=13):
+    size = size * hud_scale()
     try:
         blf.size(0, size)
     except TypeError:

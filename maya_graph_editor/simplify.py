@@ -229,30 +229,18 @@ def _draw_hud():
         return
     try:
         pct = ctx.scene.mge_settings.simplify_tolerance
-        w = region.width
-        x0, x1 = 24, max(w - 24, 200)
-        common.draw_rect(x0 - 10, 14, x1 + 10, 78, (0.08, 0.08, 0.09, 0.78))
         if ses.planning:
             n = sum(p.snap.n for p in ses.plans)
-            common.draw_text(x0, 58, "SIMPLIFY   analysing %d keys... %d%%"
-                             % (n, int(ses.progress * 100)), 14, (1, 1, 1, 1))
-            common.draw_text(x0, 22, "Esc = cancel (nothing has changed yet)", 11,
-                             (0.75, 0.75, 0.78, 1))
-            common.draw_rect(x0, 44, x1, 48, (0.3, 0.3, 0.33, 1))
-            common.draw_rect(x0, 44, x0 + (x1 - x0) * ses.progress, 48, (0.35, 0.65, 1.0, 1))
+            common.draw_slider_hud(
+                region, "SIMPLIFY   analysing %d keys... %d%%" % (n, int(ses.progress * 100)),
+                ses.progress, "Esc = cancel (nothing has changed yet)")
             return
         before, after = counts(ses.plans, pct)
-        common.draw_text(x0, 58, "SIMPLIFY   tolerance %.2f%%   keys %d → %d  (−%d)"
-                         % (pct, before, after, before - after), 14, (1, 1, 1, 1))
-        common.draw_text(x0, 22, "move mouse / drag slider · Shift = fine · "
-                         "click or Enter = apply · Esc or right-click = cancel",
-                         11, (0.75, 0.75, 0.78, 1))
-        track_y = 44
-        common.draw_rect(x0, track_y, x1, track_y + 4, (0.3, 0.3, 0.33, 1))
-        f = min(max(pct / MAX_PCT, 0.0), 1.0)
-        common.draw_rect(x0, track_y, x0 + (x1 - x0) * f, track_y + 4, (0.35, 0.65, 1.0, 1))
-        kx = x0 + (x1 - x0) * f
-        common.draw_rect(kx - 4, track_y - 4, kx + 4, track_y + 8, (1, 1, 1, 1))
+        common.draw_slider_hud(
+            region, "SIMPLIFY   tolerance %.2f%%   keys %d \u2192 %d  (\u2212%d)"
+            % (pct, before, after, before - after), pct / MAX_PCT,
+            "move mouse / drag slider \u00b7 Shift = fine \u00b7 click or Enter = apply \u00b7 "
+            "Esc or right-click = cancel")
     except Exception:
         common.log_exception("simplify HUD")
 

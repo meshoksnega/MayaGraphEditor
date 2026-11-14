@@ -82,6 +82,58 @@ def swap_with_buffer(fcurves, slot='A', scene=None, settings=None):
     return count
 
 
+def snapshot_from_action(fcurves, source_action, slot='A', scene=None, settings=None):
+    """Ghost each curve with the matching channel (same path and index) of
+    another action, e.g. a mocap reference or an earlier take."""
+    by_channel = {(fc.data_path, fc.array_index): fc for fc in common.action_fcurves(source_action)}
+    count = 0
+    for fc in fcurves:
+        src = by_channel.get((fc.data_path, fc.array_index))
+        if src is None or src == fc:
+            continue
+        samples = common.sample_curve(src, frame_range=_sample_range(src, scene, settings))
+        if samples is None:
+            continue
+        _buffers[(slot, common.curve_key(fc))] = Buffer(samples, common.CurveSnapshot.of(src))
+        count += 1
+    return count
+
+
+def swap_range_with_buffer(fcurves, slot='A'):
+    """Swap only the time range of the selected keys with the buffer."""
+    count = 0
+    for fc in fcurves:
+        key = (slot, common.curve_key(fc))
+        buf = _buffers.get(key)
+        if buf is None:
+            continue
+        current = common.CurveSnapshot.of(fc)
+        if not current.selected.any():
+            continue
+        xs = current.co[current.selected, 0]
+        x0, x1 = float(xs.min()), float(xs.max())
+        cur_part = common.sample_curve(fc, frame_range=(x0, x1))
+        new_curve = current.splice(buf.keys, x0, x1)
+        new_buffer_keys = buf.keys.splice(current, x0, x1)
+        s = buf.samples
+        outside = s[(s[:, 0] < x0) | (s[:, 0] > x1)]
+        merged = np.concatenate([outside, cur_part]) if cur_part is not None else outside
+        merged = merged[np.argsort(merged[:, 0], kind="stable")]
+        new_curve.write(fc)
+        _buffers[key] = Buffer(merged, new_buffer_keys)
+        count += 1
+    return count
+
+
+PALETTES = {
+    # grey / orange / magenta: clear of Blender's red, green, blue channel colours
+    'DEFAULT': ((0.85, 0.85, 0.85, 0.55), (1.0, 0.55, 0.15, 0.65), (0.95, 0.35, 0.95, 0.65)),
+    # Okabe-Ito yellow / reddish purple / white: distinguishable with the common
+    # forms of colour blindness, and from the channel colours
+    'CB_SAFE': ((0.94, 0.89, 0.26, 0.8), (0.80, 0.47, 0.65, 0.85), (1.0, 1.0, 1.0, 0.7)),
+}
+
+
 # --------------------------------------------------------------------------
 # Saving in the .blend
 # --------------------------------------------------------------------------
@@ -243,6 +295,68 @@ class MGE_OT_ghost_swap(_GhostOp, bpy.types.Operator):
         return {'FINISHED'}
 
 
+class MGE_OT_ghost_from_action(_GhostOp, bpy.types.Operator):
+    bl_idname = "mge.ghost_from_action"
+    bl_label = "Ghost from Action"
+    bl_description = ("Show the matching channels of another action (a reference, mocap or an "
+                      "earlier take) as ghosts in the active slot")
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        st = common.get_settings(context)
+        if st.ghost_source is None:
+            self.report({'WARNING'}, "Pick a source action first")
+            return {'CANCELLED'}
+        curves = common.selected_visible_fcurves(context) or common.visible_fcurves(context)
+        n = snapshot_from_action(curves, st.ghost_source, st.ghost_slot, context.scene, st)
+        if n == 0:
+            self.report({'WARNING'}, "'%s' has no channels matching the shown curves"
+                        % st.ghost_source.name)
+            return {'CANCELLED'}
+        st.ghost_show = True
+        setattr(st, "ghost_show_" + st.ghost_slot.lower(), True)
+        self.report({'INFO'}, "Ghost %s: %d curve(s) from '%s'" % (st.ghost_slot, n, st.ghost_source.name))
+        common.redraw_graph_editors()
+        return {'FINISHED'}
+
+
+class MGE_OT_ghost_swap_range(_GhostOp, bpy.types.Operator):
+    bl_idname = "mge.ghost_swap_range"
+    bl_label = "Swap Range"
+    bl_description = ("Swap only the time range of the selected keys with the ghost in the "
+                      "active slot, leaving the rest of the curve alone")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        slot = common.get_settings(context).ghost_slot
+        n = swap_range_with_buffer(common.editable_fcurves(context), slot)
+        if n == 0:
+            self.report({'WARNING'}, "Select keys on a curve that has a ghost in slot %s" % slot)
+            return {'CANCELLED'}
+        common.redraw_graph_editors()
+        return {'FINISHED'}
+
+
+class MGE_OT_ghost_palette(_GhostOp, bpy.types.Operator):
+    bl_idname = "mge.ghost_palette"
+    bl_label = "Ghost Palette"
+    bl_description = "Set the three ghost colours to a preset palette"
+    bl_options = {'INTERNAL'}
+
+    palette: bpy.props.EnumProperty(items=(
+        ('DEFAULT', "Default", "Grey, orange, magenta"),
+        ('CB_SAFE', "Colour-Blind Safe", "Yellow, purple and white, distinguishable with the "
+                                         "common forms of colour blindness"),
+    ))
+
+    def execute(self, context):
+        st = common.get_settings(context)
+        for slot, colour in zip(SLOTS, PALETTES[self.palette]):
+            setattr(st, "ghost_color_" + slot.lower(), colour)
+        common.redraw_graph_editors()
+        return {'FINISHED'}
+
+
 # --------------------------------------------------------------------------
 # Drawing
 # --------------------------------------------------------------------------
@@ -290,7 +404,8 @@ def _draw():
                     continue
                 scale, offset = common.display_mapping(fc, space, scene)
                 s = buf.samples
-                px = ox + s[:, 0] * tscale * sx
+                nscale, noff = common.nla_mapping(fc)
+                px = ox + (s[:, 0] * nscale + noff) * tscale * sx
                 py = oy + (s[:, 1] + offset) * scale * sy
                 if settings.ghost_style == 'DASHED':
                     common.draw_segments(dash_segments(px, py), color, settings.ghost_width)
@@ -364,8 +479,12 @@ class MGE_PT_ghost(bpy.types.Panel):
         row.operator("mge.ghost_snapshot", icon='FCURVE_SNAPSHOT')
         row.operator("mge.ghost_swap", icon='ARROW_LEFTRIGHT')
         row = layout.row(align=True)
+        row.operator("mge.ghost_swap_range", icon='UV_SYNC_SELECT')
         row.operator("mge.ghost_clear", icon='X')
-        row.operator("mge.ghost_clear", text="Clear All", icon='TRASH').slot = 'ALL'
+        row.operator("mge.ghost_clear", text="", icon='TRASH').slot = 'ALL'
+        row = layout.row(align=True)
+        row.prop(st, "ghost_source", text="")
+        row.operator("mge.ghost_from_action", text="", icon='IMPORT')
 
         layout.prop(st, "ghost_show", text="Show Ghosts", toggle=True,
                     icon='HIDE_OFF' if st.ghost_show else 'HIDE_ON')
@@ -386,7 +505,9 @@ class MGE_PT_ghost(bpy.types.Panel):
         row.label(text="Range")
         row.prop(st, "ghost_range", text="")
         col.prop(st, "ghost_save")
+        col.operator_menu_enum("mge.ghost_palette", "palette", text="Colour Palette")
 
 
 classes = (MGE_OT_ghost_snapshot, MGE_OT_ghost_clear, MGE_OT_ghost_swap,
+           MGE_OT_ghost_from_action, MGE_OT_ghost_swap_range, MGE_OT_ghost_palette,
            MGE_PT_ghost)

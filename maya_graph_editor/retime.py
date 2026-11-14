@@ -363,6 +363,9 @@ def finish(context, apply):
     if apply:
         if ses.drag is not None:
             _commit(context)
+        from . import blocking
+        fmap = _lookup(context, ses)
+        blocking.auto_round(context, [fmap[c.key] for c in ses.curves if c.key in fmap])
     else:
         fmap = _lookup(context, ses)
         for c in ses.curves:
