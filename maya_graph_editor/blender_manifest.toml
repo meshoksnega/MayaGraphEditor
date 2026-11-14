@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "maya_graph_editor"
+version = "1.0.0"
+name = "Maya Graph Editor Tools"
+tagline = "Buffer curve, one-click tangents, live simplify and retiming for the Graph Editor"
+maintainer = "meshoksnega"
+type = "add-on"
+website = "https://github.com/meshoksnega/MayaGraphEditor"
+
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Animation"]
