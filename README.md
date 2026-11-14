@@ -26,6 +26,26 @@ python3 build.py     # writes dist/maya_graph_editor-1.0.0.zip (+ a -legacy.zip)
   `maya_graph_editor-1.0.0.zip`.
 * Legacy add-on install (Preferences → Add-ons → Install from Disk) → use the `-legacy.zip`.
 
+## Updating from GitHub
+
+**Preferences → Add-ons (or Extensions) → Maya Graph Editor Tools → Updates**:
+
+* **Check for Updates** asks GitHub for the latest release of this repository and compares it with the installed
+  version.
+* If a newer one exists, **Install x.y.z** downloads the right zip (Extension or legacy), checks its SHA-256 when
+  GitHub provides one, and installs it with Blender's own installer. **Release Notes** opens the release page.
+* **Check for updates on startup** (off by default) checks at most once a day.
+* Needs Blender's **Allow Online Access** (Preferences → System → Network). Nothing is downloaded otherwise.
+* After an update, Blender's status bar reports *Reinstalled "maya_graph_editor"*. Legacy installs need a
+  Blender restart.
+
+### Publishing a release (maintainer)
+
+1. Bump the version in **both** `maya_graph_editor/blender_manifest.toml` and `bl_info` in `__init__.py`
+   (`build.py` refuses to build if they differ).
+2. Commit, then tag and push: `git tag v1.1.0 && git push origin v1.1.0`.
+3. The **Release** GitHub Action builds both zips and publishes the release. That's what the updater installs.
+
 ## Using the tools
 
 ### 1. Buffer / Ghost Curve
@@ -97,6 +117,7 @@ Headless tests run against a real `bpy` (`pip install bpy`, Python 3.11+ dependi
 ```bash
 python tests/test_addon.py            # registration/toggles, snapshots, tangents, ghost, retime, simplify
 python tests/test_simplify_model.py   # simplify error model vs. Blender's real curve evaluation
+python tests/test_updater.py          # updater: versions, asset choice, checksum, Blender installer
 ```
 
 `test_simplify_model.py` removes keys with the planned tolerance, rebuilds the curve in Blender, evaluates it and
@@ -110,6 +131,7 @@ maya_graph_editor/
   __init__.py  core.py          registration, preferences, per-tool toggles, settings
   common.py                     curve snapshots, unit/normalisation mapping, drawing helpers
   ghost.py  tangents.py  simplify.py  retime.py      the four tools
+  updater.py                    GitHub release check / install
   simplify_core.py              removal-order maths (numpy only)
   blender_manifest.toml
 tests/  build.py

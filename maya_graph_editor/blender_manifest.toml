@@ -11,3 +11,6 @@ website = "https://github.com/meshoksnega/MayaGraphEditor"
 blender_version_min = "4.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
 tags = ["Animation"]
+
+[permissions]
+network = "Check GitHub for new releases of this add-on"
