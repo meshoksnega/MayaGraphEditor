@@ -7,7 +7,7 @@ unregisters its operators, panel and draw handlers entirely.
 
 import bpy
 
-from . import common, ghost, retime, simplify, tangents
+from . import common, ghost, retime, simplify, tangents, updater
 
 # Registration order == panel order (the panels also set bl_order).
 TOOLS = (
@@ -118,11 +118,19 @@ class MGE_Preferences(bpy.types.AddonPreferences):
     enable_retime: bpy.props.BoolProperty(
         name="Retiming Lattice", default=True, update=_schedule_sync)
 
+    update_auto_check: bpy.props.BoolProperty(
+        name="Check for updates on startup",
+        description="Ask GitHub for a newer release at most once a day (needs Online Access)",
+        default=False)
+    update_last_check: bpy.props.FloatProperty(default=0.0, options={'HIDDEN'})
+
     def draw(self, context):
         layout = self.layout
         layout.label(text="Tools (each can be switched off independently):")
         _draw_toggles(layout, self)
         layout.label(text="Find the tools in the Graph Editor sidebar (N) > Maya tab.")
+        layout.separator()
+        updater.draw_prefs(layout, self)
 
 
 class MGE_PT_settings(bpy.types.Panel):
@@ -144,9 +152,10 @@ class MGE_PT_settings(bpy.types.Panel):
             self.layout.label(text="Preferences unavailable")
             return
         _draw_toggles(self.layout, prefs)
+        updater.draw_sidebar_notice(self.layout)
 
 
-_core_classes = (MGE_Settings, MGE_Preferences, MGE_PT_settings)
+_core_classes = (MGE_Settings, MGE_Preferences, MGE_PT_settings) + updater.classes
 
 
 def register():
@@ -158,6 +167,7 @@ def register():
     sync_tools()
     # Preferences may not be readable yet while the add-on is being enabled.
     bpy.app.timers.register(sync_tools, first_interval=0.2)
+    bpy.app.timers.register(updater.maybe_auto_check, first_interval=5.0)
 
 
 def unregister():

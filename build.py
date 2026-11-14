@@ -15,6 +15,10 @@ PKG = ROOT / "maya_graph_editor"
 DIST = ROOT / "dist"
 
 version = re.search(r'^version = "([^"]+)"', (PKG / "blender_manifest.toml").read_text(), re.M).group(1)
+bl_version = re.search(r'"version": \((\d+), (\d+), (\d+)\)', (PKG / "__init__.py").read_text())
+if ".".join(bl_version.groups()) != version:
+    raise SystemExit("version mismatch: blender_manifest.toml says %s, bl_info says %s"
+                     % (version, ".".join(bl_version.groups())))
 files = sorted(p for p in PKG.rglob("*") if p.is_file() and "__pycache__" not in p.parts
                and p.suffix != ".pyc")
 

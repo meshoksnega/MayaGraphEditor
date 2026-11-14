@@ -1,0 +1,37 @@
+name: Release
+
+# Push a tag like v1.1.0 (matching the version in blender_manifest.toml and
+# bl_info) to build the zips and publish a GitHub release. The add-on's
+# "Check for Updates" button installs from the newest release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check tag matches add-on version
+        run: |
+          v=$(grep -Po '^version = "\K[^"]+' maya_graph_editor/blender_manifest.toml)
+          if [ "v$v" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match manifest version $v"; exit 1
+          fi
+
+      - name: Build zips
+        run: python build.py
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
