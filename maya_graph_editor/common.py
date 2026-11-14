@@ -357,10 +357,16 @@ def sample_curve(fc, step=0.25, max_points=4000, frame_range=None):
 
 def view_affine(region):
     """Linear map view->region pixels: returns (ox, oy, sx, sy)."""
+    # view_to_region() returns rounded pixels in recent Blender versions, so a
+    # scale taken from two nearby points drifts by many pixels across the view.
+    # region_to_view() of the region corners gives exact floats instead.
     v2d = region.view2d
-    ox, oy = v2d.view_to_region(0.0, 0.0, clip=False)
-    ux, uy = v2d.view_to_region(1.0, 1.0, clip=False)
-    return float(ox), float(oy), float(ux - ox), float(uy - oy)
+    w, h = max(region.width, 1), max(region.height, 1)
+    vx0, vy0 = v2d.region_to_view(0, 0)
+    vx1, vy1 = v2d.region_to_view(w, h)
+    sx = w / (vx1 - vx0) if vx1 != vx0 else 1.0
+    sy = h / (vy1 - vy0) if vy1 != vy0 else 1.0
+    return -vx0 * sx, -vy0 * sy, sx, sy
 
 
 # --------------------------------------------------------------------------

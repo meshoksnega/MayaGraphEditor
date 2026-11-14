@@ -172,6 +172,13 @@ def sequence():
     yield 0.3
     redraw()
     shot("01_curve")
+    r = region_of(graph_area(), 'WINDOW')
+    ox, oy, sx, sy = common.view_affine(r)
+    worst = 0.0
+    for fx, vy in ((1, 0.0), (20, 1.5), (40, 3.0), (-30, -2.0), (90, 5.0)):
+        px, py = r.view2d.view_to_region(fx, vy, clip=False)
+        worst = max(worst, abs(ox + fx * sx - px), abs(oy + vy * sy - py))
+    check(worst <= 1.0, "overlay mapping matches Blender's view within 1 px (worst %.2f px)" % worst)
 
     # ---------------------------------------------------------- ghost
     print("ghost", flush=True)
