@@ -7,7 +7,8 @@ unregisters its operators, panel and draw handlers entirely.
 
 import bpy
 
-from . import common, curves, ghost, keymaps, retime, simplify, stats, tangents, updater
+from . import (cleanup, common, curves, ghost, keymaps, retime, simplify, slider, smooth, stats,
+               tangents, tween, updater, warp)
 
 # Registration order == panel order (the panels also set bl_order).
 TOOLS = (
@@ -17,6 +18,10 @@ TOOLS = (
     ("retime", retime, "Retiming Lattice"),
     ("curves", curves, "Curves (Infinity, Euler Filter)"),
     ("stats", stats, "Key Stats (frame / value fields)"),
+    ("tween", tween, "Tween / Breakdown slider"),
+    ("smooth", smooth, "Smooth (live preview)"),
+    ("warp", warp, "Time Warp (ease timing)"),
+    ("cleanup", cleanup, "Mocap Cleanup (bake, simplify, tangents)"),
 )
 
 _active = set()
@@ -26,6 +31,7 @@ _active = set()
 def _on_load_pre(_dummy=None):
     simplify.abort_session()
     retime.abort_session()
+    slider.abort_session()
 
 
 # --------------------------------------------------------------------------
@@ -135,6 +141,36 @@ class MGE_Settings(bpy.types.PropertyGroup):
         name="Value", get=stats.get_value, set=stats.set_value, precision=3,
         description="Absolute: value of every selected key. Relative: offset")
 
+    # --- tween / smooth / warp
+    tween_bias: bpy.props.FloatProperty(
+        name="Tween", default=50.0, min=-50.0, max=150.0, precision=0, subtype='PERCENTAGE',
+        description="0% = previous key, 100% = next key, beyond = overshoot",
+        update=lambda s, c: slider.on_value_changed("tween", c))
+    smooth_sigma: bpy.props.FloatProperty(
+        name="Blur", default=2.0, min=0.0, max=20.0, precision=1,
+        description="Width of the smoothing, in frames",
+        update=lambda s, c: slider.on_value_changed("smooth", c))
+    warp_amount: bpy.props.FloatProperty(
+        name="Amount", default=50.0, min=0.0, max=100.0, precision=0, subtype='PERCENTAGE',
+        description="Blend from linear timing (0%) to the full easing (100%)",
+        update=lambda s, c: slider.on_value_changed("warp", c))
+    warp_shape: bpy.props.EnumProperty(
+        name="Shape", items=[('EASE_IN', "Ease In", "Slow in: keys bunch up at the start"),
+                             ('EASE_OUT', "Ease Out", "Slow out: keys bunch up at the end"),
+                             ('EASE_IN_OUT', "In/Out", "Slow in and out")],
+        default='EASE_IN_OUT')
+
+    # --- mocap cleanup
+    cleanup_bake: bpy.props.BoolProperty(
+        name="Bake to Every Frame", default=True,
+        description="Resample the selected range to a key on every whole frame first")
+    cleanup_tolerance: bpy.props.FloatProperty(
+        name="Tolerance", default=1.0, min=0.0, max=100.0, soft_max=25.0, precision=2,
+        subtype='PERCENTAGE',
+        description="Largest allowed deviation, as a percentage of each curve's value range")
+    cleanup_tangent: bpy.props.EnumProperty(
+        name="Tangents", items=cleanup.TANGENT_ITEMS, default='CLAMPED')
+
     # --- retime
     retime_percent: bpy.props.FloatProperty(
         name="Scale", default=100.0, min=1.0, soft_max=400.0, subtype='PERCENTAGE',
@@ -186,6 +222,17 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         name="Curves", default=True, update=_schedule_sync)
     enable_stats: bpy.props.BoolProperty(
         name="Key Stats", default=True, update=_schedule_sync)
+    enable_tween: bpy.props.BoolProperty(
+        name="Tween", default=True, update=_schedule_sync)
+    enable_smooth: bpy.props.BoolProperty(
+        name="Smooth", default=True, update=_schedule_sync)
+    enable_warp: bpy.props.BoolProperty(
+        name="Time Warp", default=True, update=_schedule_sync)
+    enable_cleanup: bpy.props.BoolProperty(
+        name="Mocap Cleanup", default=True, update=_schedule_sync)
+    use_theme_colors: bpy.props.BoolProperty(
+        name="Use theme colours for on-screen bars and the lattice", default=True,
+        update=_redraw)
     show_header_tangents: bpy.props.BoolProperty(
         name="Tangent buttons in the Graph Editor header", default=False, update=_redraw,
         description="Also show the six tangent buttons as icons in the Graph Editor header")
@@ -202,6 +249,7 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         _draw_toggles(layout, self)
         layout.label(text="Find the tools in the Graph Editor sidebar (N) > Maya tab.")
         layout.prop(self, "show_header_tangents")
+        layout.prop(self, "use_theme_colors")
         layout.separator()
         keymaps.draw_prefs(layout)
         layout.separator()
@@ -230,7 +278,8 @@ class MGE_PT_settings(bpy.types.Panel):
         updater.draw_sidebar_notice(self.layout)
 
 
-_core_classes = (MGE_Settings, MGE_Preferences, MGE_PT_settings) + updater.classes
+_core_classes = (MGE_Settings, MGE_Preferences, MGE_PT_settings) + updater.classes + \
+    slider.core_classes
 
 
 def register():

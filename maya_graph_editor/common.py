@@ -14,7 +14,8 @@ import bpy
 # Name of the add-on package (differs between legacy add-on / Extension install).
 PKG = __package__
 
-TOOL_IDS = ("ghost", "tangents", "simplify", "retime", "curves", "stats")
+TOOL_IDS = ("ghost", "tangents", "simplify", "retime", "curves", "stats",
+            "tween", "smooth", "warp", "cleanup")
 
 
 # --------------------------------------------------------------------------
@@ -458,6 +459,67 @@ def draw_text(x, y, text, size=13, color=(1, 1, 1, 1)):
     blf.color(0, *color)
     blf.position(0, x, y, 0)
     blf.draw(0, text)
+
+
+# --------------------------------------------------------------------------
+# Colours (theme-aware, Phase 3)
+# --------------------------------------------------------------------------
+
+_FIXED = {
+    "bg": (0.08, 0.08, 0.09, 0.80), "text": (1.0, 1.0, 1.0, 1.0),
+    "dim": (0.75, 0.75, 0.78, 1.0), "track": (0.30, 0.30, 0.33, 1.0),
+    "accent": (0.35, 0.65, 1.0, 1.0), "active": (1.0, 0.8, 0.2, 1.0),
+}
+
+
+def _rgba(c, alpha=1.0):
+    c = tuple(c)
+    return (c[0], c[1], c[2], c[3] if len(c) > 3 else alpha)
+
+
+def ui_colors():
+    """HUD / lattice colours from the current theme, or fixed fallbacks."""
+    prefs = get_prefs()
+    if prefs is not None and not getattr(prefs, "use_theme_colors", True):
+        return dict(_FIXED)
+    try:
+        theme = bpy.context.preferences.themes[0]
+        ge = theme.graph_editor
+        ui = theme.user_interface
+        back = tuple(ge.space.header)[:3]
+        return {
+            "bg": (back[0] * 0.8, back[1] * 0.8, back[2] * 0.8, 0.85),
+            "text": _rgba(ge.space.text_hi),
+            "dim": _rgba(ge.space.text),
+            "track": _rgba(ui.wcol_numslider.inner),
+            "accent": _rgba(ui.wcol_numslider.item),
+            "active": _rgba(ge.vertex_select),
+        }
+    except Exception:
+        return dict(_FIXED)
+
+
+def with_alpha(color, alpha):
+    return (color[0], color[1], color[2], alpha)
+
+
+def draw_slider_hud(region, title, frac, hint, marks=()):
+    """Bar at the bottom of the Graph Editor: title, track with knob, hint."""
+    col = ui_colors()
+    w = region.width
+    x0, x1 = 24, max(w - 24, 200)
+    draw_rect(x0 - 10, 14, x1 + 10, 78, col["bg"])
+    draw_text(x0, 58, title, 14, col["text"])
+    draw_text(x0, 22, hint, 11, col["dim"])
+    track_y = 44
+    draw_rect(x0, track_y, x1, track_y + 4, col["track"])
+    f = min(max(frac, 0.0), 1.0)
+    for m in marks:
+        mx = x0 + (x1 - x0) * min(max(m, 0.0), 1.0)
+        draw_rect(mx - 1, track_y - 3, mx + 1, track_y + 7, col["dim"])
+    draw_rect(x0, track_y, x0 + (x1 - x0) * f, track_y + 4, col["accent"])
+    kx = x0 + (x1 - x0) * f
+    draw_rect(kx - 4, track_y - 4, kx + 4, track_y + 8, col["text"])
 
 
 def text_width(text, size=13):

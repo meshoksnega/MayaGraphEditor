@@ -26,6 +26,8 @@ jobs:
         run: python tests/test_addon.py
       - name: v1.1 feature tests
         run: python tests/test_v11.py
+      - name: v1.2 feature tests
+        run: python tests/test_v12.py
       - name: Simplify model vs Blender
         run: python tests/test_simplify_model.py
       - name: Updater tests
@@ -67,6 +69,16 @@ jobs:
         run: |
           timeout 600 xvfb-run -a -s "-screen 0 1600x1000x24" ./blender/blender \
             --factory-startup --enable-event-simulate --python tests/gui/run_gui_tests.py
+      - name: Print screenshots into the log (small JPEGs, base64)
+        if: always() && matrix.blender == '5.1.0'
+        run: |
+          for f in gui_shots/*.png; do
+            [ -e "$f" ] || continue
+            convert "$f" -resize 900x900\> -quality 72 /tmp/shot.jpg
+            echo "=====BEGIN $(basename "$f" .png).jpg"
+            base64 -w 1000 /tmp/shot.jpg
+            echo "=====END"
+          done
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
