@@ -55,7 +55,7 @@ jobs:
       - name: Download Blender
         run: |
           url="https://download.blender.org/release/Blender${{ matrix.series }}/blender-${{ matrix.blender }}-linux-x64.tar.xz"
-          curl -sSfL "$url" -o blender.tar.xz
+          curl -sSfL --retry 5 --retry-delay 10 --retry-all-errors "$url" -o blender.tar.xz
           mkdir blender && tar -xf blender.tar.xz -C blender --strip-components=1
       - name: Install add-on (legacy layout)
         run: |
