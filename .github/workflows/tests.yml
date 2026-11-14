@@ -64,6 +64,7 @@ jobs:
       - name: Validate the extension manifest (Blender's own checker)
         run: ./blender/blender --factory-startup --command extension validate maya_graph_editor
       - name: Run GUI tests
+        if: success() || failure()
         env:
           BLENDER_USER_SCRIPTS: ${{ runner.temp }}/scripts
           MGE_SHOTS: ${{ github.workspace }}/gui_shots
