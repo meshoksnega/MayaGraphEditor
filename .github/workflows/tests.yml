@@ -77,8 +77,8 @@ jobs:
         run: |
           for name in tween smooth warp region; do
             ls gui_shots/*_gif_${name}_*.png >/dev/null 2>&1 || continue
-            convert -delay 45 -loop 0 gui_shots/*_gif_${name}_*.png -resize 640x640\> \
-              -colors 128 -layers Optimize "gui_shots/demo_${name}.gif"
+            convert -delay 45 -loop 0 gui_shots/*_gif_${name}_*.png -resize 760x760\> +repage \
+              -dither None -colors 160 "gui_shots/demo_${name}.gif"
             echo "=====BEGIN demo_${name}.gif"
             base64 -w 1000 "gui_shots/demo_${name}.gif"
             echo "=====END"
