@@ -199,8 +199,24 @@ def _check_worker(installed, kind):
              message="You have the latest version (%s)" % version_str(installed))
 
 
-def _download_worker(info):
+def _fresh_release(info, kind):
+    """The release as GitHub has it *now*: a release can be edited, re-tagged or
+    deleted between "Check for Updates" and "Install", which leaves a dead link."""
+    if kind is None:
+        return info
     try:
+        fresh = fetch_latest(kind)
+    except Exception:
+        return info  # keep the link we have; the download reports any problem
+    if fresh.get("asset_url"):
+        _set(latest=fresh)
+        return fresh
+    return info
+
+
+def _download_worker(info, kind=None):
+    try:
+        info = _fresh_release(info, kind)
         req = _request(info["asset_url"])
         req.headers["Accept"] = "application/octet-stream"
         folder = tempfile.mkdtemp(prefix="mge_update_")
@@ -221,6 +237,11 @@ def _download_worker(info):
         if digest.startswith("sha256:") and digest[7:].lower() != h.hexdigest():
             raise RuntimeError("Downloaded file failed its checksum, not installed")
         _set(status="DOWNLOADING", message="Installing %s..." % version_str(info.get("version")), zip_path=path)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            _set(status="ERROR", message="The release changed on GitHub: click Check for Updates again")
+        else:
+            _set(status="ERROR", message="Download failed: GitHub answered HTTP %d" % e.code)
     except Exception as e:
         _set(status="ERROR", message="Download failed: %s" % e)
 
@@ -284,7 +305,8 @@ def start_install():
         _set(status="ERROR", message="Online access is off (Preferences > System > Network)")
         return
     _set(status="DOWNLOADING", message="Downloading %s..." % version_str(st["latest"]["version"]), zip_path=None)
-    threading.Thread(target=_download_worker, args=(st["latest"],), daemon=True).start()
+    threading.Thread(target=_download_worker, args=(st["latest"], install_kind()[0]),
+                     daemon=True).start()
     _ensure_timer()
 
 
