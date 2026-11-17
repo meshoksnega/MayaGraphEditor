@@ -155,7 +155,6 @@ TABLE = {
     # ---- channels
     "Isolate": ("Изолировать", "Aislar", "Isoler", "Isolieren", "分離表示", "隔离", "Isolar"),
     "Show All": ("Показать все", "Mostrar todo", "Tout afficher", "Alle anzeigen", "すべて表示", "全部显示", "Mostrar tudo"),
-    "Auto Frame Selection": ("Автокадрирование выделения", "Encuadrar selección automáticamente", "Cadrer la sélection automatiquement", "Auswahl automatisch einpassen", "選択を自動フレーム", "自动框显所选", "Enquadrar seleção automaticamente"),
     "Channel Sets": ("Наборы каналов", "Conjuntos de canales", "Jeux de canaux", "Kanal-Sets", "チャンネルセット", "通道集", "Conjuntos de canais"),
     "Select channels, then +": ("Выберите каналы и нажмите +", "Selecciona canales y pulsa +", "Sélectionnez des canaux, puis +", "Kanäle wählen, dann +", "チャンネルを選んで + を押す", "选择通道后点 +", "Selecione canais e clique +"),
     "Select Keys": ("Выделить ключи", "Seleccionar claves", "Sélectionner des clés", "Keys wählen", "キーを選択", "选择关键帧", "Selecionar chaves"),
@@ -184,7 +183,6 @@ TABLE = {
     "Read-only: turn off to edit": ("Только просмотр: отключите для правки", "Solo lectura: desactiva para editar", "Lecture seule : désactivez pour éditer", "Nur Ansicht: zum Bearbeiten ausschalten", "表示専用：編集するにはオフに", "只读：关闭后可编辑", "Somente leitura: desative para editar"),
     # ---- preferences / updater
     "Check for Updates": ("Проверить обновления", "Buscar actualizaciones", "Rechercher des mises à jour", "Nach Updates suchen", "アップデートを確認", "检查更新", "Verificar atualizações"),
-    "Check for updates on startup": ("Проверять обновления при запуске", "Buscar actualizaciones al iniciar", "Rechercher les mises à jour au démarrage", "Beim Start nach Updates suchen", "起動時にアップデートを確認", "启动时检查更新", "Verificar atualizações ao iniciar"),
     "Install Update": ("Установить обновление", "Instalar actualización", "Installer la mise à jour", "Update installieren", "アップデートをインストール", "安装更新", "Instalar atualização"),
     "Release Notes": ("Что нового", "Notas de la versión", "Notes de version", "Versionshinweise", "リリースノート", "发行说明", "Notas da versão"),
     "All Releases": ("Все версии", "Todas las versiones", "Toutes les versions", "Alle Versionen", "すべてのリリース", "所有版本", "Todas as versões"),

@@ -26,6 +26,19 @@ PROP = "mge_ghosts"
 # (slot, curve key) -> Buffer
 _buffers = {}
 _handle = None
+_needs_load = True   # ghosts saved in the open file not read yet (bpy.data is
+                     # restricted while add-ons register, so it's done on first use)
+
+
+def ensure_loaded():
+    global _needs_load
+    if _needs_load:
+        _needs_load = False
+        try:
+            if not _buffers:
+                load_from_actions()
+        except Exception:
+            common.log_exception("loading ghosts")
 
 
 class Buffer:
@@ -37,6 +50,7 @@ class Buffer:
 
 
 def buffer_count(slot=None):
+    ensure_loaded()
     return sum(1 for (s, _k) in _buffers if slot is None or s == slot)
 
 
@@ -55,6 +69,7 @@ def _sample_range(fc, scene, settings):
 
 def take_snapshot(fcurves, slot='A', scene=None, settings=None):
     """Store a buffer for each F-Curve in `slot`. Returns the number stored."""
+    ensure_loaded()
     count = 0
     for fc in fcurves:
         rng = _sample_range(fc, scene, settings)
@@ -69,6 +84,7 @@ def take_snapshot(fcurves, slot='A', scene=None, settings=None):
 def swap_with_buffer(fcurves, slot='A', scene=None, settings=None):
     """Maya's 'swap buffer curve': the curve takes the buffered shape and the
     shape it had becomes the new buffer."""
+    ensure_loaded()
     count = 0
     for fc in fcurves:
         key = (slot, common.curve_key(fc))
@@ -102,6 +118,7 @@ def snapshot_from_action(fcurves, source_action, slot='A', scene=None, settings=
 
 def swap_range_with_buffer(fcurves, slot='A'):
     """Swap only the time range of the selected keys with the buffer."""
+    ensure_loaded()
     count = 0
     for fc in fcurves:
         key = (slot, common.curve_key(fc))
@@ -163,6 +180,7 @@ def _snap_from_props(group):
 
 def store_in_actions(enabled=True):
     """Write buffers onto their actions (and remove stale ones)."""
+    ensure_loaded()  # never drop ghosts that were saved but not read yet
     by_action = {}
     if enabled:
         for (slot, (action_name, path, index)), buf in _buffers.items():
@@ -185,6 +203,8 @@ def store_in_actions(enabled=True):
 
 def load_from_actions():
     """Rebuild buffers from the actions of the current file."""
+    global _needs_load
+    _needs_load = False
     clear_buffers()
     for action in bpy.data.actions:
         data = action.get(PROP)
@@ -379,6 +399,9 @@ def dash_segments(px, py, dash=8.0, gap=6.0):
 
 
 def _draw():
+    if not common.tool_enabled("ghost"):
+        return
+    ensure_loaded()
     if not _buffers:
         return
     ctx = bpy.context
@@ -426,20 +449,9 @@ def register_tool():
                          (bpy.app.handlers.save_pre, _on_save_pre)):
         if fn not in handlers:
             handlers.append(fn)
-    # Ghosts saved in the file that is already open.  bpy.data is restricted
-    # while add-ons register, so read it a moment later.
-    bpy.app.timers.register(_load_deferred, first_interval=0.0)
+    global _needs_load
+    _needs_load = True  # ghosts saved in the open file are read on first use
     common.redraw_graph_editors()
-
-
-def _load_deferred():
-    try:
-        if not _buffers:
-            load_from_actions()
-    except Exception:
-        common.log_exception("loading ghosts")
-    common.redraw_graph_editors()
-    return None
 
 
 def unregister_tool():

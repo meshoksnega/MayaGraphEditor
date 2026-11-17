@@ -39,21 +39,27 @@ flags = {n: True for n in common.TOOL_IDS}
 fake = types.SimpleNamespace(**{"enable_" + n: True for n in common.TOOL_IDS})
 common.get_prefs = lambda: fake
 addon.register()
-check(core._active == set(common.TOOL_IDS), "all four tools registered")
+check(core._registered == [t[0] for t in core.TOOLS], "every tool registered once, at enable time")
 check(hasattr(bpy.ops.mge, "set_tangent") and hasattr(bpy.ops.mge, "ghost_snapshot")
       and hasattr(bpy.ops.mge, "simplify") and hasattr(bpy.ops.mge, "retime"),
       "operators exist")
-for name in common.TOOL_IDS:
+timers_before = bpy.app.timers.is_registered
+ui_ctx = types.SimpleNamespace(space_data=types.SimpleNamespace(type='GRAPH_EDITOR', mode='FCURVES'),
+                               area=None, region=None)
+for name, module, _label in core.TOOLS:
+    panels = [c for c in module.classes if issubclass(c, bpy.types.Panel)]
+    others = [m for m in core.TOOLS if m[0] != name]
+    check(all(p.poll(ui_ctx) for p in panels), "'%s' panel shown while enabled" % name)
     setattr(fake, "enable_" + name, False)
-    core.sync_tools()
-    check(name not in core._active and core._active == set(common.TOOL_IDS) - {name},
-          "disabling '%s' leaves the other three registered" % name)
-    cls = core.TOOLS[[t[0] for t in core.TOOLS].index(name)][1].classes[0]
-    check(not cls.is_registered if hasattr(cls, "is_registered") else True,
-          "  '%s' operator class unregistered" % name)
+    check(not any(p.poll(ui_ctx) for p in panels), "  switched off: panel hidden")
+    ops = [c for c in module.classes if issubclass(c, bpy.types.Operator)]
+    check(all(not o.poll(ui_ctx) for o in ops), "  switched off: its operators and shortcuts do nothing")
+    other_panels = [c for _n, m, _l in others for c in m.classes if issubclass(c, bpy.types.Panel)]
+    check(all(p.is_registered for p in module.classes if hasattr(p, "is_registered")) and
+          all(p.poll(ui_ctx) for p in other_panels), "  nothing unregistered; the other tools unaffected")
     setattr(fake, "enable_" + name, True)
-    core.sync_tools()
-    check(name in core._active, "re-enabling '%s' works" % name)
+check(all(p.poll(ui_ctx) for _n, m, _l in core.TOOLS for p in m.classes
+          if issubclass(p, bpy.types.Panel)), "switched back on: every panel shown again")
 scene = bpy.context.scene
 check(scene.mge_settings.simplify_tolerance == 2.0, "scene settings exist")
 
@@ -205,7 +211,13 @@ check(state(fc) == before, "cancel (restore) is exact")
 # ---------------------------------------------------------------------------
 print("unregister")
 addon.unregister()
-check(core._active == set() and not hasattr(bpy.types.Scene, "mge_settings"), "clean unregister")
+check(core._registered == [] and not hasattr(bpy.types.Scene, "mge_settings"), "clean unregister")
+addon.register()
+addon.register_count = None
+addon.unregister()
+addon.register()
+check(core._registered == [t[0] for t in core.TOOLS], "enable / disable / enable again works (no double gating)")
+addon.unregister()
 
 print()
 print("FAILURES: %d" % len(FAILS))

@@ -347,7 +347,8 @@ class MGE_MT_tangent_pie(bpy.types.Menu):
 
 def _draw_header(self, context):
     prefs = common.get_prefs()
-    if prefs is None or not getattr(prefs, "show_header_tangents", False):
+    if prefs is None or not getattr(prefs, "show_header_tangents", False) \
+            or not common.tool_enabled("tangents"):
         return
     if not common.graph_poll(context, fcurves_only=False):
         return

@@ -1,15 +1,23 @@
-""""What's New" popup, shown once after the add-on has been updated."""
+""""What's New": after an update, a short note in the Maya tab and the
+preferences links to what changed.  Nothing pops up by itself and no timer
+runs; opening the note marks the version as seen."""
 
 import bpy
 
 from . import common
 
 CHANGES = {
+    (1, 3, 1): [
+        "Leaner: every tool is registered once and the add-on runs no background timers",
+        "Switching a tool off hides it instead of unloading it",
+        "Auto Frame removed; What's New is now this note instead of a popup",
+        "The update check runs only when you click Check for Updates",
+    ],
     (1, 3, 0): [
         "Blocking: Stepped Preview, Round to Whole Frames, Seamless Loop, Equalize Handles",
         "Stagger and Overlap: offset bones / curves in time, or generate follow-through",
         "Key Sliders: Blender's own slider tools, one click away",
-        "Channels: saved channel sets, Isolate, Auto Frame, selection helpers",
+        "Channels: saved channel sets, Isolate, selection helpers",
         "Noise and Settle generators with live preview",
         "Shape library, and Copy / Paste with Merge, Replace, Insert and Fit",
         "Ghosts from another action, Swap Range, colour-blind-safe palette",
@@ -48,9 +56,14 @@ class MGE_OT_whats_new(bpy.types.Operator):
     bl_description = "Show what changed in recent versions"
     bl_options = {'INTERNAL'}
 
-    since: bpy.props.StringProperty(default="0.0.0")
+    since: bpy.props.StringProperty(default="")
 
     def invoke(self, context, event):
+        prefs = common.get_prefs()
+        if prefs is not None:
+            if not self.since:
+                self.since = prefs.last_seen_version or "0.0.0"
+            prefs.last_seen_version = _vstr(current_version())  # opened: seen
         return context.window_manager.invoke_popup(self, width=520)
 
     def execute(self, context):
@@ -70,25 +83,27 @@ class MGE_OT_whats_new(bpy.types.Operator):
             "https://github.com/meshoksnega/MayaGraphEditor/releases"
 
 
-def maybe_show():
-    """Timer after startup: show the popup once per update (never on first install)."""
+def remember_first_install():
+    """On a fresh install there's nothing new to announce: remember the version."""
     try:
         prefs = common.get_prefs()
-        if prefs is None:
-            return None
-        cur = _vstr(current_version())
-        last = prefs.last_seen_version
-        if last == cur:
-            return None
-        prefs.last_seen_version = cur
-        if last and pending(last, current_version()) and prefs.show_whats_new:
-            wm = bpy.context.window_manager
-            if wm and wm.windows:
-                with bpy.context.temp_override(window=wm.windows[0]):
-                    bpy.ops.mge.whats_new('INVOKE_DEFAULT', since=last)
+        if prefs is not None and not prefs.last_seen_version:
+            prefs.last_seen_version = _vstr(current_version())
     except Exception:
-        common.log_exception("what's new")
-    return None
+        pass
+
+
+def notice_pending():
+    prefs = common.get_prefs()
+    if prefs is None or not prefs.show_whats_new or not prefs.last_seen_version:
+        return False
+    return bool(pending(prefs.last_seen_version, current_version()))
+
+
+def draw_notice(layout):
+    if notice_pending():
+        layout.operator("mge.whats_new", icon='INFO',
+                        text="Updated to %s: what's new" % _vstr(current_version()))
 
 
 classes = (MGE_OT_whats_new,)

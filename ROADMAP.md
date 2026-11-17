@@ -30,11 +30,21 @@ buried in a menu.
 * Visual check from real screenshots led to new ghost colours (no longer confused with the blue Z channel) and
   sidebar labels that don't clip.
 
+## 1.3.1: extensions.blender.org review fixes
+
+* **Auto Frame removed.** It re-framed the view on a timer; framing is the animator's call.
+* **No dynamic (un)registration.** Every tool registers once when the add-on is enabled. Switching a tool off
+  hides its panel and makes its operators, shortcuts and overlays do nothing (checked in `poll()`), with no timer.
+* **No background timers.** Ghosts saved in a file are read on first use instead of by a deferred timer; What's
+  New is a note in the Maya tab instead of a timed popup; the GitHub update check runs only when clicked.
+  The store build (`build.py --store`) contains no timer at all; Simplify's analysis uses a modal timer that
+  exists only while that operator runs.
+
 ## Done in 1.3.0 (Phases 4 to 7)
 
 * **Blocking and overlap:** Stepped Preview, Round to Whole Frames (with Auto), Seamless Loop, Equalize Handles,
   Stagger, a Key Sliders hub for Blender's slider tools.
-* **Finding and showing curves:** channel sets, Isolate, Auto Frame, selection helpers, ghosts from another
+* **Finding and showing curves:** channel sets, Isolate, selection helpers, ghosts from another
   action, Swap Range.
 * **Generators and shapes:** Overlap generator, Noise, Settle, shape library, copy/paste with Merge / Replace /
   Insert / Fit. Stacked view was researched (`docs/research_stacked_view.md`): a true stacked editing view needs

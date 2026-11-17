@@ -1,13 +1,16 @@
 """Update the add-on from the latest GitHub release.
 
-* Check: asks the GitHub API for the latest published release of REPO and
+* Check (only when you click Check for Updates): asks the GitHub API for the
+  latest published release of REPO and
   compares its tag (``v1.2.0`` / ``1.2.0``) with the installed version.
 * Install: downloads the matching release asset (the Extension zip, or the
   ``-legacy.zip`` for a legacy add-on install), verifies its SHA-256 when
   GitHub provides one, and hands it to Blender's own installer.
 
 Network access happens on a worker thread (Blender never freezes) and only
-when Blender's "Allow Online Access" preference is on.
+when Blender's "Allow Online Access" preference is on.  While a check or
+download is running, a short timer collects the result; nothing runs
+otherwise.
 """
 
 import hashlib
@@ -29,7 +32,6 @@ API_LATEST = "https://api.github.com/repos/%s/releases/latest" % REPO
 RELEASES_PAGE = "https://github.com/%s/releases" % REPO
 USER_AGENT = "maya-graph-editor-updater"
 MAX_DOWNLOAD = 50 * 1024 * 1024
-AUTO_CHECK_INTERVAL = 24 * 3600
 # Survives the add-on reloading itself during an update.
 MARKER = os.path.join(tempfile.gettempdir(), "maya_graph_editor_update.json")
 
@@ -288,9 +290,6 @@ def start_check():
     if not online_allowed():
         _set(status="ERROR", message="Online access is off (Preferences > System > Network)")
         return
-    prefs = common.get_prefs()
-    if prefs is not None:
-        prefs.update_last_check = time.time()
     _set(status="CHECKING", message="Checking GitHub...")
     threading.Thread(target=_check_worker, args=(current_version(), install_kind()[0]),
                      daemon=True).start()
@@ -365,17 +364,6 @@ def restore_message():
         _set(status="INSTALLED", message=data.get("message", "Update installed"))
 
 
-def maybe_auto_check():
-    """Called shortly after startup: at most one automatic check a day."""
-    prefs = common.get_prefs()
-    if prefs is None or not prefs.update_auto_check or not online_allowed() \
-            or managed_by_blender():
-        return None
-    if time.time() - prefs.update_last_check >= AUTO_CHECK_INTERVAL:
-        start_check()
-    return None
-
-
 # --------------------------------------------------------------------------
 # Operators + UI
 # --------------------------------------------------------------------------
@@ -439,9 +427,7 @@ def draw_prefs(layout, prefs):
         row.operator("mge.update_install",
                      text="Install %s" % version_str(st["latest"]["version"]), icon='IMPORT')
         row.operator("wm.url_open", text="Release Notes", icon='URL').url = st["latest"]["notes_url"]
-    row = box.row()
-    row.prop(prefs, "update_auto_check")
-    row.operator("wm.url_open", text="All Releases", icon='URL').url = RELEASES_PAGE
+    box.operator("wm.url_open", text="All Releases", icon='URL').url = RELEASES_PAGE
 
 
 def draw_sidebar_notice(layout):

@@ -56,7 +56,8 @@ def _draw():
     ctx = bpy.context
     space, region, scene = ctx.space_data, ctx.region, ctx.scene
     if (space is None or space.type != 'GRAPH_EDITOR' or space.mode != 'FCURVES'
-            or region is None or scene is None or not scene.mge_settings.stacked_show):
+            or region is None or scene is None or not scene.mge_settings.stacked_show
+            or not common.tool_enabled("stacked")):
         return
     try:
         col = common.ui_colors()

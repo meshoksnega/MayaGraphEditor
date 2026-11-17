@@ -655,23 +655,23 @@ def sequence():
     check(not fc.hide and not rot.hide, "show all")
     bpy.context.scene.mge_settings.channel_sets.clear()
 
-    print("auto frame", flush=True)
-    st.auto_frame = True
-    deselect_everything()
-    yield 1.0
-    r = region_of(graph_area(), 'WINDOW')
-    for k in fc.keyframe_points[:2]:
-        k.select_control_point = True
-    yield 1.2
-    before_view = r.view2d.region_to_view(0, 0)
-    deselect_everything()
-    for k in fc.keyframe_points[3:]:
-        k.select_control_point = True
-    yield 1.5
-    after_view = r.view2d.region_to_view(0, 0)
-    check(abs(after_view[0] - before_view[0]) > 1.0, "view re-framed when the selection changed (%.1f -> %.1f)"
-          % (before_view[0], after_view[0]))
-    st.auto_frame = False
+    print("tool switched off", flush=True)
+    prefs = bpy.context.preferences.addons["maya_graph_editor"].preferences
+    prefs.enable_blocking = False
+    yield 0.2
+    with override('UI'):
+        try:
+            res = bpy.ops.mge.stepped_preview()
+        except RuntimeError:
+            res = {'POLL_FAILED'}
+    check(res != {'FINISHED'} and all(k.interpolation == 'BEZIER' for k in fc.keyframe_points),
+          "a switched-off tool's operator does nothing")
+    prefs.enable_blocking = True
+    yield 0.2
+    with override('UI'):
+        res = bpy.ops.mge.stepped_preview()
+        bpy.ops.mge.stepped_preview()
+    check(res == {'FINISHED'}, "switched back on: works again, nothing re-registered")
 
     print("settle modal / Blender slider", flush=True)
     rot.hide = True
