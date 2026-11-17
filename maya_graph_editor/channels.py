@@ -7,8 +7,6 @@ Channel Sets
     saved in the .blend.
 Isolate
     Show only the selected curves; click again to restore what was visible.
-Auto Frame
-    Frame the selected keys whenever the selection changes (Maya's auto frame).
 Select helpers
     Keys at the playhead, keys in the preview range, every Nth selected key,
     invert per curve.
@@ -20,13 +18,10 @@ channel list), so everything can also be undone by hand there.
 import json
 
 import bpy
-import numpy as np
 
 from . import common
 
 _isolate_state = {}      # curve key -> hide flag before isolating
-_frame_signature = {}    # area pointer -> last selection signature
-AUTO_FRAME_INTERVAL = 0.4
 
 
 def object_fcurves(context):
@@ -132,49 +127,6 @@ def select_keys(fcurves, mode, scene, nth=2):
                     _set_key(k, not k.select_control_point)
         count += sum(k.select_control_point for k in kps)
     return count
-
-
-# --------------------------------------------------------------------------
-# Auto frame
-# --------------------------------------------------------------------------
-
-def selection_signature(fcurves):
-    parts = []
-    for fc in fcurves:
-        n = len(fc.keyframe_points)
-        if not n:
-            continue
-        sel = np.zeros(n, dtype=bool)
-        fc.keyframe_points.foreach_get("select_control_point", sel)
-        idx = np.flatnonzero(sel)
-        if len(idx):
-            parts.append((common.curve_key(fc), len(idx), int(idx[0]), int(idx[-1])))
-    return tuple(parts)
-
-
-def _auto_frame_tick():
-    try:
-        wm = bpy.context.window_manager
-        if common.modal_owner() is not None or wm is None:
-            return AUTO_FRAME_INTERVAL
-        for win in wm.windows:
-            scene = win.scene
-            if scene is None or not scene.mge_settings.auto_frame:
-                continue
-            for area in win.screen.areas:
-                if area.type != 'GRAPH_EDITOR':
-                    continue
-                region = common.window_region(area)
-                with bpy.context.temp_override(window=win, area=area, region=region):
-                    sig = selection_signature(common.visible_fcurves(bpy.context))
-                    ptr = area.as_pointer()
-                    if sig and sig != _frame_signature.get(ptr):
-                        if ptr in _frame_signature:  # not on the very first look
-                            bpy.ops.graph.view_selected()
-                    _frame_signature[ptr] = sig
-    except Exception:
-        common.log_exception("auto frame")
-    return AUTO_FRAME_INTERVAL
 
 
 # --------------------------------------------------------------------------
@@ -325,7 +277,6 @@ class MGE_PT_channels(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("mge.isolate", icon='SOLO_ON', depress=is_isolated())
         row.operator("mge.channels_show_all", icon='HIDE_OFF')
-        layout.prop(st, "auto_frame")
 
         box = layout.box()
         row = box.row()
@@ -354,12 +305,8 @@ classes = (MGE_OT_channel_set_add, MGE_OT_channel_set_apply, MGE_OT_channel_set_
 
 
 def register_tool():
-    if not bpy.app.timers.is_registered(_auto_frame_tick):
-        bpy.app.timers.register(_auto_frame_tick, first_interval=1.0, persistent=True)
+    pass
 
 
 def unregister_tool():
-    if bpy.app.timers.is_registered(_auto_frame_tick):
-        bpy.app.timers.unregister(_auto_frame_tick)
-    _frame_signature.clear()
     _isolate_state.clear()

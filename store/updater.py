@@ -11,10 +11,6 @@ def restore_message():
     pass
 
 
-def maybe_auto_check():
-    return None
-
-
 def draw_prefs(layout, prefs):
     pass
 

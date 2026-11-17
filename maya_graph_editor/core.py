@@ -1,8 +1,11 @@
-"""Settings, preferences and per-tool registration.
+"""Settings, preferences and registration.
 
-Each tool can be switched on/off independently (Preferences, or the
-"Maya Tools" panel in the Graph Editor sidebar).  Switching a tool off
-unregisters its operators, panel and draw handlers entirely.
+Every tool is registered once, when the add-on is enabled, and unregistered
+when it is disabled.  Switching a single tool off (Preferences, or the
+"Enabled Tools" panel in the sidebar) hides its panel and makes its
+operators, shortcuts and overlays do nothing: their poll() and draw
+callbacks check the preference.  Nothing is registered later, and the
+add-on runs no background timers.
 """
 
 import bpy
@@ -32,7 +35,7 @@ TOOLS = (
     ("stacked", stacked, "Stacked Overview (experimental)"),
 )
 
-_active = set()
+_registered = []   # tool names, in registration order
 
 
 @bpy.app.handlers.persistent
@@ -43,38 +46,32 @@ def _on_load_pre(_dummy=None):
 
 
 # --------------------------------------------------------------------------
-# Tool registration
+# Tool on/off
 # --------------------------------------------------------------------------
 
-def sync_tools():
-    """Register / unregister tools to match the preferences."""
-    for name, module, _label in TOOLS:
-        want = common.tool_enabled(name)
-        if want and name not in _active:
-            for cls in module.classes:
-                try:
-                    bpy.utils.register_class(cls)
-                except Exception:
-                    common.log_exception("register %s" % cls.__name__)
-            module.register_tool()
-            keymaps.add(name)
-            _active.add(name)
-        elif not want and name in _active:
-            keymaps.remove(name)
-            module.unregister_tool()
-            for cls in reversed(module.classes):
-                try:
-                    bpy.utils.unregister_class(cls)
-                except Exception:
-                    pass
-            _active.discard(name)
+def _gate(cls, tool):
+    """Make cls.poll() return False while `tool` is switched off.
+
+    Hides panels and menus, and turns operators (buttons, F3 search and
+    shortcuts) into no-ops, without registering or unregistering anything."""
+    if cls.__dict__.get("_mge_tool") == tool:
+        return  # already gated (add-on enabled a second time this session)
+    cls.poll = classmethod(_gated_poll(getattr(cls, "poll", None), tool))
+    cls._mge_tool = tool
+
+
+def _gated_poll(base, tool):
+    # Blender requires poll(cls, context) exactly, so capture in a closure.
+    # `base` is the original poll bound to the class (it may come from a mixin).
+    def poll(cls, context):
+        if not common.tool_enabled(tool):
+            return False
+        return base(context) if base is not None else True
+    return poll
+
+
+def _on_toggle(_self=None, _context=None):
     common.redraw_graph_editors()
-    return None  # when used as a timer: don't repeat
-
-
-def _schedule_sync(_self=None, _context=None):
-    # Defer: don't (un)register classes from inside a UI property callback.
-    bpy.app.timers.register(sync_tools, first_interval=0.0)
 
 
 # --------------------------------------------------------------------------
@@ -131,9 +128,6 @@ class MGE_Settings(bpy.types.PropertyGroup):
 
     # --- channels
     channel_sets: bpy.props.CollectionProperty(type=MGE_ChannelSet)
-    auto_frame: bpy.props.BoolProperty(
-        name="Auto Frame Selection", default=False,
-        description="Frame the selected keys whenever the selection changes")
     select_nth: bpy.props.IntProperty(name="N", default=2, min=2, max=100)
 
     # --- ghost extras
@@ -318,38 +312,39 @@ class MGE_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
     enable_tangents: bpy.props.BoolProperty(
-        name="One-Click Tangents", default=True, update=_schedule_sync)
+        name="One-Click Tangents", default=True, update=_on_toggle)
     enable_ghost: bpy.props.BoolProperty(
-        name="Buffer / Ghost Curve", default=True, update=_schedule_sync)
+        name="Buffer / Ghost Curve", default=True, update=_on_toggle)
     enable_simplify: bpy.props.BoolProperty(
-        name="Curve Simplify", default=True, update=_schedule_sync)
+        name="Curve Simplify", default=True, update=_on_toggle)
     enable_retime: bpy.props.BoolProperty(
-        name="Retiming Lattice", default=True, update=_schedule_sync)
+        name="Retiming Lattice", default=True, update=_on_toggle)
     enable_curves: bpy.props.BoolProperty(
-        name="Curves", default=True, update=_schedule_sync)
+        name="Curves", default=True, update=_on_toggle)
     enable_stats: bpy.props.BoolProperty(
-        name="Key Stats", default=True, update=_schedule_sync)
+        name="Key Stats", default=True, update=_on_toggle)
     enable_tween: bpy.props.BoolProperty(
-        name="Tween", default=True, update=_schedule_sync)
+        name="Tween", default=True, update=_on_toggle)
     enable_smooth: bpy.props.BoolProperty(
-        name="Smooth", default=True, update=_schedule_sync)
+        name="Smooth", default=True, update=_on_toggle)
     enable_warp: bpy.props.BoolProperty(
-        name="Time Warp", default=True, update=_schedule_sync)
+        name="Time Warp", default=True, update=_on_toggle)
     enable_cleanup: bpy.props.BoolProperty(
-        name="Mocap Cleanup", default=True, update=_schedule_sync)
-    enable_blocking: bpy.props.BoolProperty(name="Blocking", default=True, update=_schedule_sync)
-    enable_stagger: bpy.props.BoolProperty(name="Stagger / Overlap", default=True, update=_schedule_sync)
-    enable_hub: bpy.props.BoolProperty(name="Key Sliders", default=True, update=_schedule_sync)
-    enable_channels: bpy.props.BoolProperty(name="Channels", default=True, update=_schedule_sync)
-    enable_generate: bpy.props.BoolProperty(name="Noise / Settle", default=True, update=_schedule_sync)
-    enable_shapes: bpy.props.BoolProperty(name="Shapes & Paste", default=True, update=_schedule_sync)
-    enable_stacked: bpy.props.BoolProperty(name="Stacked Overview", default=True, update=_schedule_sync)
+        name="Mocap Cleanup", default=True, update=_on_toggle)
+    enable_blocking: bpy.props.BoolProperty(name="Blocking", default=True, update=_on_toggle)
+    enable_stagger: bpy.props.BoolProperty(name="Stagger / Overlap", default=True, update=_on_toggle)
+    enable_hub: bpy.props.BoolProperty(name="Key Sliders", default=True, update=_on_toggle)
+    enable_channels: bpy.props.BoolProperty(name="Channels", default=True, update=_on_toggle)
+    enable_generate: bpy.props.BoolProperty(name="Noise / Settle", default=True, update=_on_toggle)
+    enable_shapes: bpy.props.BoolProperty(name="Shapes & Paste", default=True, update=_on_toggle)
+    enable_stacked: bpy.props.BoolProperty(name="Stacked Overview", default=True, update=_on_toggle)
     hud_scale: bpy.props.FloatProperty(
         name="On-Screen Text Size", default=1.0, min=0.8, max=2.5, step=10, precision=1,
         description="Size of the text in the add-on's on-screen bars, lattice and overviews",
         update=_redraw)
     show_whats_new: bpy.props.BoolProperty(
-        name="Show What's New after an update", default=True)
+        name="Show What's New after an update", default=True,
+        description="After an update, show a short note in the Maya tab with a link to what changed")
     last_seen_version: bpy.props.StringProperty(default="", options={'HIDDEN'})
     use_theme_colors: bpy.props.BoolProperty(
         name="Use theme colours for on-screen bars and the lattice", default=True,
@@ -358,11 +353,6 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         name="Tangent buttons in the Graph Editor header", default=False, update=_redraw,
         description="Also show the six tangent buttons as icons in the Graph Editor header")
 
-    update_auto_check: bpy.props.BoolProperty(
-        name="Check for updates on startup",
-        description="Ask GitHub for a newer release at most once a day (needs Online Access)",
-        default=False)
-    update_last_check: bpy.props.FloatProperty(default=0.0, options={'HIDDEN'})
 
     def draw(self, context):
         layout = self.layout
@@ -375,6 +365,7 @@ class MGE_Preferences(bpy.types.AddonPreferences):
         row = layout.row(align=True)
         row.operator("mge.settings_export", icon='EXPORT')
         row.operator("mge.settings_import", icon='IMPORT')
+        whatsnew.draw_notice(layout)
         row = layout.row(align=True)
         row.prop(self, "show_whats_new")
         row.operator("mge.whats_new", text="What's New", icon='INFO')
@@ -402,6 +393,7 @@ class MGE_PT_settings(bpy.types.Panel):
         if prefs is None:
             self.layout.label(text="Preferences unavailable")
             return
+        whatsnew.draw_notice(self.layout)
         _draw_toggles(self.layout, prefs)
         updater.draw_sidebar_notice(self.layout)
 
@@ -418,25 +410,26 @@ def register():
     if _on_load_pre not in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.append(_on_load_pre)
     updater.restore_message()
-    sync_tools()
-    # Preferences may not be readable yet while the add-on is being enabled.
-    bpy.app.timers.register(sync_tools, first_interval=0.2)
-    bpy.app.timers.register(updater.maybe_auto_check, first_interval=5.0)
-    bpy.app.timers.register(whatsnew.maybe_show, first_interval=2.0)
+    for name, module, _label in TOOLS:
+        for cls in module.classes:
+            _gate(cls, name)
+            bpy.utils.register_class(cls)
+        module.register_tool()
+        keymaps.add(name)
+        _registered.append(name)
+    whatsnew.remember_first_install()
 
 
 def unregister():
     i18n.unregister()
     keymaps.remove_all()
     for name, module, _label in reversed(TOOLS):
-        if name in _active:
-            module.unregister_tool()
-            for cls in reversed(module.classes):
-                try:
-                    bpy.utils.unregister_class(cls)
-                except Exception:
-                    pass
-    _active.clear()
+        if name not in _registered:
+            continue
+        module.unregister_tool()
+        for cls in reversed(module.classes):
+            bpy.utils.unregister_class(cls)
+    _registered.clear()
     if _on_load_pre in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(_on_load_pre)
     if hasattr(bpy.types.Scene, "mge_settings"):

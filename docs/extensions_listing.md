@@ -38,7 +38,7 @@ and every tool can be switched off on its own.
 - **Stagger and Overlap.** Offset bones in time, or generate follow-through down a chain.
 - **Noise and Settle.** Smooth noise, or a decaying wobble after a move.
 - **Shape library and paste modes.** Reuse a good ease or overshoot; paste with Merge, Replace, Insert or Fit.
-- **Channel sets, Isolate, Auto Frame** and selection helpers.
+- **Channel sets, Isolate** and selection helpers.
 
 Every interactive tool previews on the real curves: **Enter** keeps the result as one undo step,
 **Esc** puts everything back exactly.

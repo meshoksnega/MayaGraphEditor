@@ -39,7 +39,7 @@ _curves = []
 common.editable_fcurves = lambda context=None: list(_curves)
 ctx = types.SimpleNamespace(area=types.SimpleNamespace(as_pointer=lambda: 1), scene=scene,
                             workspace=None, window=None)
-check(set(core._active) == set(common.TOOL_IDS), "all %d tools registered" % len(common.TOOL_IDS))
+check(set(core._registered) == set(common.TOOL_IDS), "all %d tools registered" % len(common.TOOL_IDS))
 
 
 def run_slider(tool, value):

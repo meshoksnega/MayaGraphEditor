@@ -20,25 +20,26 @@ sidebar (**N → Maya** tab). No new windows, no node graph, nothing that touche
 | **Blocking** | Stepped Preview for blocking review, Round to Whole Frames, Seamless Loop, Equalize Handles. |
 | **Stagger / Overlap** | Offset bones or curves in time for overlap, or generate follow-through down a chain. |
 | **Key Sliders** | Blender's own slider tools (Breakdown, Ease, Push/Pull, Shear and more), one click away. |
-| **Channels & Selection** | Saved channel sets, Isolate, Auto Frame, selection helpers. |
+| **Channels & Selection** | Saved channel sets, Isolate, selection helpers. |
 | **Noise / Settle** | Add smooth noise, or a decaying wobble after a move. |
 | **Shapes & Paste** | A library of curve shapes, and copy/paste with Merge, Replace, Insert and Fit. |
 | **Stacked Overview** | Experimental read-only view with one lane per curve. |
 
 Each tool can be switched off independently (**Preferences → Add-ons → Maya Graph Editor Tools**, or the
-collapsed *Enabled Tools* panel at the bottom of the Maya tab). A disabled tool is fully unregistered: no
-operators, panel, draw handler or shortcuts.
+collapsed *Enabled Tools* panel at the bottom of the Maya tab). A switched-off tool's panel is hidden and its
+operators, shortcuts and overlays do nothing. All tools are registered once when the add-on is enabled, and the
+add-on runs no background timers.
 
 ## Install
 
 Requires **Blender 4.2 or newer** (tested in CI on 4.2 LTS and 5.1).
 
 ```bash
-python3 build.py     # writes dist/maya_graph_editor-1.3.0.zip (+ a -legacy.zip)
+python3 build.py     # writes dist/maya_graph_editor-1.3.1.zip (+ a -legacy.zip)
 ```
 
 * **Blender 4.2+:** Preferences → Get Extensions → ⌄ menu → *Install from Disk…* → pick
-  `maya_graph_editor-1.3.0.zip`.
+  `maya_graph_editor-1.3.1.zip`.
 * Legacy add-on install (Preferences → Add-ons → Install from Disk) → use the `-legacy.zip`.
 
 ## Shortcuts (Graph Editor)
@@ -193,7 +194,6 @@ Gaussian and Butterworth Smooth, and others), normally three menus deep. They wo
 * **Channel Sets**: select channels, press **+**, name the set. Clicking a set shows only those channels on the
   selected objects. Sets store property names, so one set works on every character with the same rig.
 * **Isolate** shows only the selected curves; click again to restore. **Show All** unhides everything.
-* **Auto Frame Selection** frames the selected keys whenever the selection changes.
 * **Select Keys**: at the playhead, in the preview range, every Nth, or invert per curve.
 
 ### Noise / Settle
@@ -220,11 +220,10 @@ so turn it off to edit.
 **Preferences → Add-ons (or Extensions) → Maya Graph Editor Tools → Updates**:
 
 * **Check for Updates** asks GitHub for the latest release of this repository and compares its version with
-  the installed one. The version comes from the zip's name (`maya_graph_editor-1.3.0.zip`), or from the tag
-  (`v1.3.0`) if the zip name has none.
+  the installed one. The version comes from the zip's name (`maya_graph_editor-1.3.1.zip`), or from the tag
+  (`v1.3.1`) if the zip name has none.
 * **Install x.y.z** downloads the right zip (Extension or legacy), checks its SHA-256 when GitHub provides one,
   and installs it with Blender's own installer. **Release Notes** opens the release page.
-* **Check for updates on startup** (off by default) checks at most once a day.
 * Needs Blender's **Allow Online Access** (Preferences → System → Network). Nothing is downloaded otherwise.
 
 ### extensions.blender.org
@@ -236,7 +235,7 @@ remote repository also switches its updater off.) Listing text is in `docs/exten
 ### Publishing a release (maintainer)
 1. Bump the version in **both** `maya_graph_editor/blender_manifest.toml` and `bl_info` in `__init__.py`
    (`build.py` refuses to build if they differ).
-2. Commit, then tag and push: `git tag v1.3.0 && git push origin v1.3.0`. Use the add-on's version as the tag,
+2. Commit, then tag and push: `git tag v1.3.1 && git push origin v1.3.1`. Use the add-on's version as the tag,
    because add-on versions up to 1.1.0 read the version from the tag only.
 3. The **Release** GitHub Action builds both zips and publishes the release. That's what the updater installs.
 
@@ -249,7 +248,7 @@ remote repository also switches its updater off.) Listing text is in `docs/exten
   `maya_graph_editor/i18n_data.py`; corrections from native speakers are welcome.
 * On-screen bars and the lattice use your **theme's colours**, and **On-Screen Text Size** makes them larger.
 * **Export / Import Settings** moves tool options, enabled tools, shortcuts and channel sets between machines.
-* After an update a **What's New** summary appears once (can be turned off).
+* After an update, a **What's New** note appears in the Maya tab and the preferences (can be turned off).
 
 ## Tests
 

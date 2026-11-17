@@ -42,14 +42,13 @@ common.editable_fcurves = lambda context=None: list(_curves)  # no Graph Editor 
 
 # ---------------------------------------------------------------------------
 print("tools and shortcuts")
-check(core._active == set(common.TOOL_IDS), "six tools registered: %s" % sorted(core._active))
+check(core._registered == [t[0] for t in core.TOOLS], "tools registered: %s" % core._registered)
 check(set(keymaps._items) == {"tangents", "ghost", "simplify", "retime"}, "shortcuts registered per tool")
+ui_ctx = types.SimpleNamespace(space_data=types.SimpleNamespace(type='GRAPH_EDITOR', mode='FCURVES'))
 fake.enable_simplify = False
-core.sync_tools()
-check("simplify" not in keymaps._items, "disabling a tool removes its shortcut")
+check(not bpy.types.MGE_OT_simplify.poll(ui_ctx), "disabling a tool makes its shortcut do nothing")
 fake.enable_simplify = True
-core.sync_tools()
-check("simplify" in keymaps._items, "re-enabling restores it")
+check(bpy.types.MGE_OT_simplify.poll(ui_ctx), "re-enabling restores it")
 
 # ---------------------------------------------------------------------------
 print("tangents: sides, break, unify, new-key default")

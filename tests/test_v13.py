@@ -52,7 +52,7 @@ common.editable_fcurves = lambda context=None: list(_curves)
 common.visible_fcurves = lambda context=None: list(_curves)
 ctx = types.SimpleNamespace(area=types.SimpleNamespace(as_pointer=lambda: 1), scene=scene,
                             workspace=None, window=None)
-check(set(core._active) == set(common.TOOL_IDS), "all %d tools registered" % len(common.TOOL_IDS))
+check(set(core._registered) == set(common.TOOL_IDS), "all %d tools registered" % len(common.TOOL_IDS))
 
 
 def run_slider(tool, value):
@@ -219,9 +219,7 @@ long = make_curve([(i, i) for i in range(1, 11)], obj_name="NTH")
 select_all(long)
 channels.select_keys([long], 'NTH', scene, nth=3)
 check([i for i, k in enumerate(long.keyframe_points) if k.select_control_point] == [0, 3, 6, 9], "every 3rd key")
-sig1 = channels.selection_signature([long])
-sel_only(long, [2])
-check(channels.selection_signature([long]) != sig1, "selection signature changes with the selection")
+
 
 # ---------------------------------------------------------------------------
 print("ghost: from another action, swap range, palette")
@@ -356,10 +354,16 @@ print("what's new / settings export")
 check(whatsnew.pending("1.2.1", (1, 3, 0)) == [(1, 3, 0)], "notes pending after updating from 1.2.1")
 check(whatsnew.pending("1.1.0", (1, 3, 0)) == [(1, 3, 0), (1, 2, 0)], "skipped versions are included")
 check(whatsnew.pending("1.3.0", (1, 3, 0)) == [], "nothing when already seen")
+cur = ".".join(str(v) for v in whatsnew.current_version())
 fake.last_seen_version = ""
-whatsnew.maybe_show()
-check(fake.last_seen_version == ".".join(str(v) for v in whatsnew.current_version()),
-      "first install: version remembered, no popup")
+whatsnew.remember_first_install()
+check(fake.last_seen_version == cur and not whatsnew.notice_pending(), "first install: nothing to announce")
+fake.last_seen_version = "1.2.1"
+check(whatsnew.notice_pending(), "after an update: a note in the Maya tab (no popup, no timer)")
+fake.show_whats_new = False
+check(not whatsnew.notice_pending(), "the note can be switched off")
+fake.show_whats_new = True
+fake.last_seen_version = cur
 st.tween_bias, st.ghost_style, st.stagger_gain = 75.0, 'DASHED', 80.0
 item = st.channel_sets.add(); item.name, item.data = "arms", json.dumps([["location", 0]])
 real_dump = presets._dump
@@ -378,6 +382,21 @@ try:
     check(False, "foreign file rejected")
 except ValueError:
     check(True, "foreign file rejected")
+
+# ---------------------------------------------------------------------------
+print("no background timers")
+import re as _re  # noqa: E402
+src_dir = os.path.join(HERE, "..", "maya_graph_editor")
+timer_lines = []
+for fn in sorted(os.listdir(src_dir)):
+    if fn.endswith(".py"):
+        for ln in open(os.path.join(src_dir, fn), encoding="utf-8"):
+            if _re.search(r"bpy\.app\.timers\.register", ln):
+                timer_lines.append(fn)
+check(timer_lines == ["updater.py"], "only the updater (GitHub build, while a check runs) uses a timer: %s"
+      % timer_lines)
+check("auto_frame" not in scene.mge_settings.bl_rna.properties and not hasattr(channels, "_auto_frame_tick"),
+      "auto frame removed")
 
 addon.unregister()
 print()
